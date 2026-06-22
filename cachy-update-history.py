@@ -215,6 +215,21 @@ def parse_timestamp(raw):
             return datetime.strptime(raw, fmt)
         except ValueError:
             continue
+    # flatpak history emits "Jun 20 10:57:01" (LC_ALL=C, no year).
+    # Collapse repeated spaces ("Jun  3 …" for single-digit days), then try
+    # month-name formats and attach the current year, rolling back one year if
+    # the resulting datetime would be in the future.
+    normalized = re.sub(r' +', ' ', raw)
+    for fmt in ("%b %d %H:%M:%S", "%b %d %H:%M"):
+        try:
+            dt = datetime.strptime(normalized, fmt)
+            now = datetime.now()
+            dt = dt.replace(year=now.year)
+            if dt > now:
+                dt = dt.replace(year=now.year - 1)
+            return dt
+        except ValueError:
+            continue
     return None
 
 
@@ -404,11 +419,15 @@ def read_flatpak_all():
     has no history entry, a single "installed" row dated from its deploy mtime.
     This way the full timeline is shown where available, while every currently
     installed Flatpak is guaranteed to appear even if its history is empty.
+
+    History is filtered to installed app IDs only — `flatpak history` also
+    includes runtimes and locale extensions that are not user-facing apps.
     """
     if not shutil.which("flatpak"):
         return []
     installed = read_flatpak_installed()
-    history = read_flatpak_history()
+    app_ids = {rec["pkg"] for rec in installed}
+    history = [r for r in read_flatpak_history() if r["pkg"] in app_ids]
     seen = {r["pkg"] for r in history}
     extra = [rec for rec in installed if rec["pkg"] not in seen]
     return history + extra
