@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Update History
+GenericName=Package Update History
+Comment=Show recent Pacman, AUR and Flatpak package updates
+# Adjust the path to wherever you copied the script (replace YOUR_USERNAME):
+Exec=python /home/YOUR_USERNAME/.local/bin/cachy-update-history.py
+Icon=system-software-update
+Terminal=false
+Categories=System;Utility;
+Keywords=pacman;aur;flatpak;updates;history;cachyos;arch;
