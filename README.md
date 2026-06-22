@@ -17,30 +17,26 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 
 ## Features
 
-- **Four sources in one place** — Pacman / official repos, AUR, **Flathub** and
-  other Flatpak remotes, each marked with its own colored badge.
+- **Three sources in one place** — Pacman / official repos, AUR and Flatpak,
+  each marked with its own colored badge.
 - **Filter by text, source and action** — all three combine; filtering is
   instant even on large logs (it runs through Qt's view proxy, not a rebuild).
 - **Activity chart** — a packages-per-day bar chart that follows the active
   filter (pure `QPainter`, no extra dependencies).
 - **Sortable columns** — click any header; the date column sorts chronologically.
 - **CSV export** of the current (filtered + sorted) view.
+- **Language switching** — toggle between English and German at runtime; the
+  chosen language is remembered across restarts.
 - **Theme-aware** — semi-transparent badges and palette-based colors look right
   on both light and dark KDE/Breeze themes.
 
 ## How the sources are detected
 
-| Source  | Where the data comes from                                              |
-|---------|-----------------------------------------------------------------------|
-| Pacman  | Parsed from `/var/log/pacman.log` (`[ALPM]` upgrade/install/… lines).  |
+| Source  | Where the data comes from |
+|---------|--------------------------|
+| Pacman  | Parsed from `/var/log/pacman.log` (`[ALPM]` upgrade/install/… lines). |
 | AUR     | A pacman-log entry is flagged as AUR when the package is **currently** installed as a *foreign* package (`pacman -Qmq`). |
-| Flathub | A Flatpak app whose `origin` is `flathub`. |
-| Flatpak | A Flatpak app from any other remote (e.g. `fedora`); the remote name is shown as the label. |
-
-Flatpak data combines the real update history from `flatpak history --system`
-and `flatpak history --user` with a guaranteed entry per installed app from
-`flatpak list` (so every app shows up even if its history is empty). The store
-per app comes from the `origin` column of `flatpak list`.
+| Flatpak | Combined from `flatpak history --system/--user` plus a fallback entry per installed app from `flatpak list` (so every app appears even if its history is empty). |
 
 > **Note on AUR detection.** The pacman log itself does not record which
 > repository a package came from. The "foreign package" heuristic is the most
@@ -66,7 +62,7 @@ Install PyQt6 from the official repositories and run the script directly:
 
 ```bash
 sudo pacman -S python-pyqt6
-git clone https://github.com/<your-user>/cachy-update-history.git
+git clone https://github.com/fenvarien/cachy-update-history.git
 cd cachy-update-history
 python cachy-update-history.py
 ```
@@ -74,7 +70,7 @@ python cachy-update-history.py
 ### Other distributions (virtual environment)
 
 ```bash
-git clone https://github.com/<your-user>/cachy-update-history.git
+git clone https://github.com/fenvarien/cachy-update-history.git
 cd cachy-update-history
 python -m venv .venv
 source .venv/bin/activate
@@ -95,6 +91,7 @@ python cachy-update-history.py
   all three filters combine.
 - Click a column header to sort; click again to reverse.
 - **Reload** re-reads all sources; **Export CSV** saves the current view.
+- **English / Deutsch** button switches the UI language at runtime.
 
 ## Desktop integration
 
@@ -121,6 +118,9 @@ LOG_PATH = "/var/log/pacman.log"
 
 Badge colors for sources and actions live in the `SOURCES` and `ACTIONS`
 dictionaries right below it, so you can re-theme the app in one place.
+
+The active language is saved to `~/.config/cachy-update-history.json` and
+restored on next launch.
 
 ## Limitations
 
