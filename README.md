@@ -11,9 +11,7 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41cd52)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-<!-- Add a screenshot here once you have one, e.g.:
 ![Screenshot](docs/screenshot.png)
--->
 
 ## Features
 
