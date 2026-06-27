@@ -91,11 +91,18 @@ def _load_config():
 
 
 def _save_config(data):
+    # Write atomically (temp file + rename) so an interrupted write can never
+    # leave a truncated, unparseable config behind.
+    tmp = _CONFIG_PATH + ".tmp"
     try:
-        with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
+        os.replace(tmp, _CONFIG_PATH)
     except OSError:
-        pass
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 _T = {
     "en": {
@@ -245,6 +252,20 @@ def split_version(action, ver):
     if action == "removed":
         return ver.strip(), "—"
     return "—", ver.strip()
+
+
+def _csv_safe(value):
+    """Neutralise CSV formula injection for spreadsheet apps.
+
+    Package names and versions come from logs we do not control. A cell that
+    starts with =, +, -, @ (or a control char) is interpreted as a formula by
+    Excel / LibreOffice, which can be abused to run code. Prefixing such a value
+    with a single quote forces it to be treated as plain text.
+    """
+    s = "" if value is None else str(value)
+    if s[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
 
 
 def get_foreign_packages():
@@ -463,7 +484,8 @@ class UpdateTableModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.rows)
 
     def columnCount(self, parent=QModelIndex()):
-        return len(tr("headers"))
+        # Called constantly by the view; avoid building a translated list here.
+        return len(self._COLS)
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
@@ -831,23 +853,24 @@ class MainWindow(QMainWindow):
         foreign = get_foreign_packages()
         try:
             with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-            for line in lines:
-                m = ACTION_PATTERN.search(line)
-                if not m:
-                    continue
-                action = m.group("action")
-                pkg = m.group("pkg")
-                old, new = split_version(action, m.group("ver"))
-                source_key = "aur" if pkg in foreign else "pacman"
-                data.append({
-                    "dt": parse_timestamp(m.group("ts")),
-                    "action_key": action,
-                    "pkg": pkg,
-                    "old": old,
-                    "new": new,
-                    "source_key": source_key,
-                })
+                # Stream line by line instead of slurping the whole log into
+                # memory — pacman.log can grow to many MB over a system's life.
+                for line in f:
+                    m = ACTION_PATTERN.search(line)
+                    if not m:
+                        continue
+                    action = m.group("action")
+                    pkg = m.group("pkg")
+                    old, new = split_version(action, m.group("ver"))
+                    source_key = "aur" if pkg in foreign else "pacman"
+                    data.append({
+                        "dt": parse_timestamp(m.group("ts")),
+                        "action_key": action,
+                        "pkg": pkg,
+                        "old": old,
+                        "new": new,
+                        "source_key": source_key,
+                    })
         except FileNotFoundError:
             self.status.showMessage(tr("file_not_found").format(path=self.log_path))
         except PermissionError:
@@ -953,7 +976,8 @@ class MainWindow(QMainWindow):
         cols = self.model.columnCount()
         rows = []
         for r in range(self.proxy.rowCount()):
-            rows.append([self.proxy.index(r, c).data() or "" for c in range(cols)])
+            rows.append([_csv_safe(self.proxy.index(r, c).data())
+                         for c in range(cols)])
         if not rows:
             QMessageBox.information(self, tr("export_dlg"), tr("export_nothing"))
             return
