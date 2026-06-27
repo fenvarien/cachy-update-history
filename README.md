@@ -52,6 +52,22 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 `/var/log/pacman.log` is world-readable on Arch by default, so **no root /
 sudo is required** to run the app.
 
+## Security &amp; robustness
+
+The app reads system data it does not control (logs, `flatpak`/`pacman`
+output), so it is written defensively:
+
+- **No shell injection** — external tools are invoked with explicit argument
+  lists (never a shell string), so package names can't break out of a command.
+- **CSV export is injection-safe** — cells beginning with `=`, `+`, `-`, `@` or
+  a control character are prefixed with a quote, so a crafted package name or
+  version can't be executed as a formula when the CSV is opened in Excel or
+  LibreOffice.
+- **Atomic config writes** — the language setting is written to a temp file and
+  renamed into place, so an interrupted write can't leave a corrupt config.
+- **Memory-safe log reading** — `pacman.log` is streamed line by line rather
+  than loaded whole, keeping memory flat no matter how large the log grows.
+
 ## Installation
 
 ### Arch / CachyOS (recommended)
