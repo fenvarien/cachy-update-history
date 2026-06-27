@@ -9,7 +9,7 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41cd52)
-![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)
 [![Release](https://img.shields.io/github/v/release/fenvarien/cachy-update-history)](https://github.com/fenvarien/cachy-update-history/releases/latest)
 
 > 🎉 **v1.0.0 is out!** First stable release — Pacman, AUR and Flatpak history
@@ -169,4 +169,4 @@ Python file, so it is easy to read and extend (for example: adding `apt`,
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Released under the [GNU General Public License v3.0](LICENSE).
