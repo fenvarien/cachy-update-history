@@ -16,7 +16,11 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 > in one view, with security hardening throughout.
 > See the [release notes](https://github.com/fenvarien/cachy-update-history/releases/tag/v1.0.0).
 
-![Screenshot](docs/screenshot.png)
+![Screenshot — German UI](docs/screenshot.png)
+*German UI*
+
+![Screenshot — English UI](docs/screenshot-en.png)
+*English UI*
 
 ## Features
 
