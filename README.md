@@ -10,6 +10,11 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41cd52)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
+[![Release](https://img.shields.io/github/v/release/fenvarien/cachy-update-history)](https://github.com/fenvarien/cachy-update-history/releases/latest)
+
+> 🎉 **v1.0.0 is out!** First stable release — Pacman, AUR and Flatpak history
+> in one view, with security hardening throughout.
+> See the [release notes](https://github.com/fenvarien/cachy-update-history/releases/tag/v1.0.0).
 
 ![Screenshot](docs/screenshot.png)
 
