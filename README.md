@@ -12,9 +12,10 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)
 [![Release](https://img.shields.io/github/v/release/fenvarien/cachy-update-history)](https://github.com/fenvarien/cachy-update-history/releases/latest)
 
-> 🎉 **v1.0.0 is out!** First stable release — Pacman, AUR and Flatpak history
-> in one view, with security hardening throughout.
-> See the [release notes](https://github.com/fenvarien/cachy-update-history/releases/tag/v1.0.0).
+> 🎉 **v1.1.0 is out!** Hover any row for on-demand package details, toggleable
+> via the new **Details** button, plus a modern UI restyled from your system's
+> accent color for a native look on KDE and GNOME.
+> See the [release notes](https://github.com/fenvarien/cachy-update-history/releases/tag/v1.1.0).
 
 ![Screenshot — German UI](docs/screenshot.png)
 *German UI*
