@@ -17,11 +17,11 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 > accent color for a native look on KDE and GNOME.
 > See the [release notes](https://github.com/fenvarien/cachy-update-history/releases/tag/v1.1.0).
 
-![Screenshot — German UI](docs/screenshot.png)
-*German UI*
+![English UI — with a package detail tooltip](docs/screenshot-en.png)
+*English UI — hover a row for package details*
 
-![Screenshot — English UI](docs/screenshot-en.png)
-*English UI*
+![German UI — with a package detail tooltip](docs/screenshot.png)
+*German UI — hover a row for package details*
 
 ## Features
 
