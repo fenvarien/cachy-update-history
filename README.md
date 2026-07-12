@@ -28,14 +28,21 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
   each marked with its own colored badge.
 - **Filter by text, source and action** — all three combine; filtering is
   instant even on large logs (it runs through Qt's view proxy, not a rebuild).
+- **Package detail tooltips** — hover any row to see richer information about
+  the package (description, version, license, installed size, repository /
+  origin, install date, website — via `pacman -Qi` / `flatpak info`). Queried
+  lazily and cached, so it never slows down loading. Toggle it on/off with the
+  **Details** button; the choice is remembered across restarts.
 - **Activity chart** — a packages-per-day bar chart that follows the active
-  filter (pure `QPainter`, no extra dependencies).
+  filter (pure `QPainter`, no extra dependencies), with gradient bars and a
+  hover readout of the exact date and count.
 - **Sortable columns** — click any header; the date column sorts chronologically.
 - **CSV export** of the current (filtered + sorted) view.
 - **Language switching** — toggle between English and German at runtime; the
   chosen language is remembered across restarts.
-- **Theme-aware** — semi-transparent badges and palette-based colors look right
-  on both light and dark KDE/Breeze themes.
+- **Native, theme-aware design** — the whole UI is styled from the system
+  palette and its **accent color**, so it fits right in on both KDE/Breeze and
+  GNOME/Adwaita and adapts automatically to light and dark themes.
 
 ## How the sources are detected
 
@@ -113,6 +120,8 @@ python cachy-update-history.py
   and action). Use the **source** and **action** dropdowns to narrow further;
   all three filters combine.
 - Click a column header to sort; click again to reverse.
+- Hover a row to see detailed package info in a tooltip; use the **Details**
+  button to turn these tooltips on or off.
 - **Reload** re-reads all sources; **Export CSV** saves the current view.
 - **English / Deutsch** button switches the UI language at runtime.
 
@@ -142,8 +151,9 @@ LOG_PATH = "/var/log/pacman.log"
 Badge colors for sources and actions live in the `SOURCES` and `ACTIONS`
 dictionaries right below it, so you can re-theme the app in one place.
 
-The active language is saved to `~/.config/cachy-update-history.json` and
-restored on next launch.
+User preferences — the active language and whether detail tooltips are enabled
+— are saved to `~/.config/cachy-update-history.json` and restored on next
+launch.
 
 ## Limitations
 

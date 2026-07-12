@@ -76,14 +76,17 @@ import shutil
 import subprocess
 from collections import OrderedDict, Counter
 from datetime import datetime
+from html import escape as _esc
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableView, QHeaderView, QPushButton, QLineEdit, QComboBox,
     QLabel, QStyledItemDelegate, QStyle, QFileDialog, QMessageBox,
-    QAbstractItemView,
+    QAbstractItemView, QToolTip,
 )
-from PyQt6.QtGui import QColor, QPainter, QFont, QIcon, QPalette
+from PyQt6.QtGui import (
+    QColor, QPainter, QFont, QIcon, QPalette, QLinearGradient, QPainterPath,
+)
 from PyQt6.QtCore import (
     Qt, QRectF, QSize, QTimer, QAbstractTableModel, QModelIndex,
     QSortFilterProxyModel,
@@ -120,10 +123,22 @@ def _save_config(data):
         except OSError:
             pass
 
+
+def _update_config(**changes):
+    """Merge ``changes`` into the on-disk config, preserving other keys."""
+    data = _load_config()
+    data.update(changes)
+    _save_config(data)
+
+
+# Runtime preferences (loaded from the config in main()).
+_TOOLTIPS_ENABLED = True
+
 _T = {
     "en": {
         "window_title":    "CachyOS Update History",
         "title_label":     "CachyOS Update History",
+        "subtitle":        "Pacman · AUR · Flatpak — every package change on one timeline",
         "search_ph":       "Filter packages (e.g. linux, nvidia, firefox) …",
         "all_sources":     "All sources",
         "all_actions":     "All actions",
@@ -155,10 +170,24 @@ _T = {
         "act_removed":     "Removed",
         "act_reinstalled": "Reinstalled",
         "act_downgraded":  "Downgraded",
+        "tooltips_btn":    "Details",
+        "tooltips_hint":   "Show detailed package information when hovering a row",
+        "tt_change":       "Version change",
+        "tt_description":  "Description",
+        "tt_repository":   "Repository",
+        "tt_version":      "Version",
+        "tt_licenses":     "License",
+        "tt_size":         "Installed size",
+        "tt_install_date": "Install date",
+        "tt_url":          "Website",
+        "tt_origin":       "Origin",
+        "tt_runtime":      "Runtime",
+        "tt_not_installed": "Not currently installed — showing log data only.",
     },
     "de": {
         "window_title":    "CachyOS Update-Verlauf",
         "title_label":     "CachyOS Update-Verlauf",
+        "subtitle":        "Pacman · AUR · Flatpak — alle Paketänderungen in einer Zeitleiste",
         "search_ph":       "Pakete filtern (z. B. linux, nvidia, firefox) …",
         "all_sources":     "Alle Quellen",
         "all_actions":     "Alle Aktionen",
@@ -190,6 +219,19 @@ _T = {
         "act_removed":     "Entfernt",
         "act_reinstalled": "Neu installiert",
         "act_downgraded":  "Herabgestuft",
+        "tooltips_btn":    "Details",
+        "tooltips_hint":   "Detaillierte Paketinfos beim Überfahren einer Zeile anzeigen",
+        "tt_change":       "Versionswechsel",
+        "tt_description":  "Beschreibung",
+        "tt_repository":   "Repository",
+        "tt_version":      "Version",
+        "tt_licenses":     "Lizenz",
+        "tt_size":         "Installierte Größe",
+        "tt_install_date": "Installiert am",
+        "tt_url":          "Webseite",
+        "tt_origin":       "Quelle",
+        "tt_runtime":      "Runtime",
+        "tt_not_installed": "Derzeit nicht installiert — es werden nur Log-Daten angezeigt.",
     },
 }
 
@@ -470,6 +512,315 @@ def read_flatpak_all():
     return history + extra
 
 
+# ─── Theme / palette-derived colors ─────────────────────────────────────────
+# Every accent used by the custom-painted widgets and the rich-text tooltips is
+# derived from the active QPalette at startup. Reading the system palette (and,
+# crucially, its Highlight color) is what makes the app feel native on both KDE
+# (Breeze) and GNOME (Adwaita) and adapt automatically to light/dark themes and
+# the user's chosen accent color. Populated by apply_theme().
+_UI = {
+    "accent":  ACCENT,
+    "muted":   "#888888",
+    "base":    "#ffffff",
+}
+
+
+def _mix(a, b, t):
+    """Linear blend between two QColors: t=0 → a, t=1 → b."""
+    return QColor(
+        round(a.red()   + (b.red()   - a.red())   * t),
+        round(a.green() + (b.green() - a.green()) * t),
+        round(a.blue()  + (b.blue()  - a.blue())  * t),
+    )
+
+
+def apply_theme(app):
+    """Build and apply a palette-derived stylesheet for a modern, native look.
+
+    Everything is computed from the running QPalette — most importantly the
+    Highlight (accent) color — so the result matches the system theme on both
+    KDE/Breeze and GNOME/Adwaita and adapts automatically to light and dark
+    variants and the user's chosen accent. The computed colors are also stashed
+    in ``_UI`` for the custom-painted widgets and rich-text tooltips.
+    """
+    pal = app.palette()
+    Role = QPalette.ColorRole
+    base   = pal.color(Role.Base)
+    window = pal.color(Role.Window)
+    text   = pal.color(Role.WindowText)
+    accent = pal.color(Role.Highlight)
+    hltext = pal.color(Role.HighlightedText)
+    dark = base.lightness() < 128
+
+    def h(c):
+        return c.name()
+
+    def rgba(c, a):
+        return f"rgba({c.red()},{c.green()},{c.blue()},{a})"
+
+    c = {
+        "bg":            h(window),
+        "base":          h(base),
+        "text":          h(text),
+        "accent":        h(accent),
+        "accent_hover":  h(_mix(accent, QColor("#ffffff"), 0.16 if not dark else 0.12)),
+        "accent_soft":   rgba(accent, 0.16),
+        "hltext":        h(hltext),
+        "border":        h(_mix(base, text, 0.20 if dark else 0.15)),
+        "field":         h(base),
+        "alt":           h(_mix(base, text, 0.05)),
+        "header":        h(_mix(window, text, 0.05)),
+        "muted":         h(_mix(base, text, 0.52)),
+        "btn":           h(_mix(window, text, 0.07 if not dark else 0.11)),
+        "btn_hover":     h(_mix(window, text, 0.13 if not dark else 0.18)),
+        "btn_press":     h(_mix(window, text, 0.20 if not dark else 0.25)),
+        "tooltip":       h(_mix(base, text, 0.06)),
+        "sb":            h(_mix(base, text, 0.22)),
+        "sb_hover":      h(_mix(base, text, 0.36)),
+    }
+
+    _UI.update(accent=c["accent"], muted=c["muted"], base=c["base"])
+
+    app.setStyleSheet(_STYLESHEET.format(**c))
+
+
+_STYLESHEET = """
+QWidget#central {{ background:{bg}; }}
+QLabel#subtitle {{ color:{muted}; }}
+
+QLineEdit {{
+    background:{field}; border:1px solid {border}; border-radius:9px;
+    padding:7px 12px; color:{text};
+    selection-background-color:{accent}; selection-color:{hltext};
+}}
+QLineEdit:focus {{ border:1px solid {accent}; }}
+
+QComboBox {{
+    background:{field}; border:1px solid {border}; border-radius:9px;
+    padding:6px 12px; color:{text}; min-width:118px;
+}}
+QComboBox:hover {{ border:1px solid {accent}; }}
+QComboBox::drop-down {{
+    border:none; width:22px;
+    subcontrol-origin:padding; subcontrol-position:center right; right:4px;
+}}
+QComboBox QAbstractItemView {{
+    background:{field}; border:1px solid {border}; border-radius:8px;
+    padding:4px; outline:none;
+    selection-background-color:{accent}; selection-color:{hltext};
+}}
+
+QPushButton {{
+    background:{btn}; border:1px solid {border}; border-radius:9px;
+    padding:7px 15px; color:{text};
+}}
+QPushButton:hover {{ background:{btn_hover}; border:1px solid {accent}; }}
+QPushButton:pressed {{ background:{btn_press}; }}
+
+QPushButton#primary {{
+    background:{accent}; border:1px solid {accent}; color:{hltext};
+    font-weight:bold;
+}}
+QPushButton#primary:hover {{
+    background:{accent_hover}; border:1px solid {accent_hover};
+}}
+QPushButton#primary:pressed {{ background:{accent}; }}
+
+QPushButton#toggle:checked {{
+    background:{accent_soft}; border:1px solid {accent}; color:{accent};
+    font-weight:bold;
+}}
+
+QTableView {{
+    background:{base}; alternate-background-color:{alt};
+    border:1px solid {border}; border-radius:12px;
+    gridline-color:transparent; outline:none; padding:3px;
+    selection-background-color:{accent}; selection-color:{hltext};
+}}
+QTableView::item {{ padding:4px 8px; border:none; }}
+
+QHeaderView {{ background:transparent; }}
+QHeaderView::section {{
+    background:{header}; color:{muted}; border:none;
+    border-bottom:1px solid {border}; padding:9px 8px; font-weight:bold;
+}}
+QHeaderView::section:hover {{ color:{accent}; }}
+QTableCornerButton::section {{ background:{header}; border:none; }}
+
+QScrollBar:vertical {{ background:transparent; width:12px; margin:2px; }}
+QScrollBar::handle:vertical {{
+    background:{sb}; border-radius:5px; min-height:34px;
+}}
+QScrollBar::handle:vertical:hover {{ background:{sb_hover}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background:transparent; }}
+QScrollBar:horizontal {{ background:transparent; height:12px; margin:2px; }}
+QScrollBar::handle:horizontal {{
+    background:{sb}; border-radius:5px; min-width:34px;
+}}
+QScrollBar::handle:horizontal:hover {{ background:{sb_hover}; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width:0; }}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background:transparent; }}
+
+QToolTip {{
+    background:{tooltip}; color:{text}; border:1px solid {border};
+    border-radius:8px; padding:8px 10px;
+}}
+
+QStatusBar {{ color:{muted}; }}
+QStatusBar::item {{ border:none; }}
+"""
+
+
+# ─── Package detail tooltips ────────────────────────────────────────────────
+# Rich, on-demand package information shown when the user hovers over a row.
+# The underlying `pacman -Qi` / `flatpak info` calls are relatively slow, so the
+# result is queried lazily (only on first hover) and cached — it never blocks
+# data loading and runs at most once per package.
+_TOOLTIP_CACHE = {}
+
+
+def _query_kv(args):
+    """Run a command with a stable C locale and parse its "Key : Value" output.
+
+    Both `pacman -Qi` and `flatpak info` print aligned "Key : Value" lines with
+    wrapped values continued on further-indented lines. Returns
+    ``(title, OrderedDict)`` where *title* is a leading non-key line (Flatpak's
+    "Name - summary" banner) or None. Returns None if the command is missing or
+    fails (e.g. the package is no longer installed).
+    """
+    try:
+        out = subprocess.run(args, capture_output=True, text=True, timeout=10,
+                             env={**os.environ, "LC_ALL": "C"})
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    info = OrderedDict()
+    title = None
+    last = None
+    for line in out.stdout.splitlines():
+        if not line.strip():
+            continue
+        m = re.match(r"\s*([A-Za-z][A-Za-z0-9 /_-]*?)\s*:\s+(\S.*)$", line)
+        if m:
+            last = m.group(1).strip()
+            info[last] = m.group(2).strip()
+        elif last is not None:               # wrapped continuation of a value
+            info[last] += " " + line.strip()
+        elif title is None:                  # leading banner (Flatpak)
+            title = line.strip()
+    return title, info
+
+
+def _clip(value, limit=160):
+    """Trim overly long field values so a tooltip stays compact."""
+    value = " ".join(value.split())
+    return value if len(value) <= limit else value[:limit - 1].rstrip() + "…"
+
+
+def _version_change(rec):
+    """Human-readable version delta for a log record, or ''. HTML-escaped."""
+    old, new = rec["old"], rec["new"]
+    if old not in ("—", "") and new not in ("—", "") and old != new:
+        return f"{_esc(old)} &rarr; {_esc(new)}"
+    if new not in ("—", ""):
+        return _esc(new)
+    if old not in ("—", ""):
+        return _esc(old)
+    return ""
+
+
+def _tt_row(label, value):
+    """One label/value row of the tooltip's detail table (value pre-escaped)."""
+    return (f"<tr>"
+            f"<td style='color:{_UI['muted']};padding:2px 14px 2px 0;"
+            f"white-space:nowrap;vertical-align:top;'>{_esc(label)}</td>"
+            f"<td style='vertical-align:top;'>{value}</td></tr>")
+
+
+def _pkg_fields(rec):
+    """Query and return the (label, value) detail rows for a package.
+
+    Returns a list of pairs, or None when the package could not be queried
+    (uninstalled / tool missing), so the caller can show a fallback note.
+    """
+    if rec["source_key"] == "flatpak":
+        parsed = _query_kv(["flatpak", "info", rec["pkg"]])
+        if not parsed:
+            return None
+        title, info = parsed
+        desc = title.split(" - ", 1)[1] if title and " - " in title else ""
+        return [
+            (tr("tt_description"), desc),
+            (tr("tt_version"),     info.get("Version")),
+            (tr("tt_licenses"),    info.get("License")),
+            (tr("tt_size"),        info.get("Installed Size")),
+            (tr("tt_origin"),      info.get("Origin")),
+            (tr("tt_runtime"),     info.get("Runtime")),
+        ]
+    parsed = _query_kv(["pacman", "-Qi", rec["pkg"]])
+    if not parsed:
+        return None
+    _title, info = parsed
+    return [
+        (tr("tt_description"),  info.get("Description")),
+        (tr("tt_repository"),   info.get("Installed From") or info.get("Repository")),
+        (tr("tt_version"),      info.get("Version")),
+        (tr("tt_licenses"),     info.get("Licenses")),
+        (tr("tt_size"),         info.get("Installed Size")),
+        (tr("tt_install_date"), info.get("Install Date")),
+        (tr("tt_url"),          info.get("URL")),
+    ]
+
+
+def _render_tooltip(rec):
+    """Build the full rich-text (HTML) tooltip for one log record."""
+    accent = _UI["accent"]
+    muted = _UI["muted"]
+
+    header = (
+        f"<div style='font-size:13px;font-weight:bold;color:{accent};'>"
+        f"{_esc(rec['pkg'])}</div>"
+        f"<div style='color:{muted};margin:2px 0 7px 0;'>"
+        f"<span style='color:{rec['source_color']};'>●</span>&nbsp;"
+        f"{_esc(rec['source_label'])}"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+        f"<span style='color:{rec['action_color']};'>"
+        f"{_esc(rec['action_label'])}</span>"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;{_esc(rec['display'])}</div>"
+    )
+
+    rows = []
+    change = _version_change(rec)
+    if change:
+        rows.append(_tt_row(tr("tt_change"), change))
+
+    fields = _pkg_fields(rec)
+    if fields is None:
+        rows.append(
+            f"<tr><td colspan='2' style='color:{muted};padding-top:3px;'>"
+            f"{_esc(tr('tt_not_installed'))}</td></tr>")
+    else:
+        for label, value in fields:
+            if value and value.strip() and value.strip() != "None":
+                rows.append(_tt_row(label, _esc(_clip(value))))
+
+    table = ("<table cellspacing='0' cellpadding='0'>" + "".join(rows) +
+             "</table>") if rows else ""
+    return header + table
+
+
+def tooltip_for(rec):
+    """Cached rich-text tooltip for a record (keyed by package + language)."""
+    key = (rec["source_key"], rec["pkg"], _LANG)
+    html = _TOOLTIP_CACHE.get(key)
+    if html is None:
+        html = _render_tooltip(rec)
+        _TOOLTIP_CACHE[key] = html
+    return html
+
+
 # Custom item-data roles used by the model below.
 COLOR_ROLE = Qt.ItemDataRole.UserRole + 1   # badge color for source/action cells
 SORT_ROLE  = Qt.ItemDataRole.UserRole + 2   # value used by the sort proxy
@@ -488,6 +839,7 @@ class UpdateTableModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self.rows = []
+        self.tooltips_enabled = _TOOLTIPS_ENABLED
         self._bold = QFont()
         self._bold.setBold(True)
 
@@ -527,6 +879,8 @@ class UpdateTableModel(QAbstractTableModel):
             return str(row[self._COLS[col]]).lower()
         if role == Qt.ItemDataRole.FontRole and col == 3:
             return self._bold
+        if role == Qt.ItemDataRole.ToolTipRole and self.tooltips_enabled:
+            return tooltip_for(row)                # lazily queried + cached
         return None
 
 
@@ -613,25 +967,80 @@ class ActivityChart(QWidget):
     def __init__(self):
         super().__init__()
         self.data = []  # list of (iso_date, count)
-        self.setMinimumHeight(170)
+        self.tooltips_enabled = _TOOLTIPS_ENABLED
+        self._hover = None            # index of the bar under the cursor
+        self._plot = None             # cached geometry for hit-testing
+        self.setMinimumHeight(180)
+        self.setMouseTracking(True)
 
     def set_data(self, data):
         self.data = data
+        self._hover = None
         self.update()
+
+    # ----- Hover interaction ------------------------------------------------
+    def _bar_at(self, pos):
+        """Return the data index for the column under a point, or None."""
+        if not self._plot or not self.data:
+            return None
+        left, top, bottom, step = self._plot
+        if pos.y() < top - 6 or pos.y() > bottom + 4:
+            return None
+        idx = int((pos.x() - left) // step)
+        return idx if 0 <= idx < len(self.data) else None
+
+    def mouseMoveEvent(self, event):
+        idx = self._bar_at(event.position())
+        if idx != self._hover:
+            self._hover = idx
+            self.update()
+        if idx is not None and self.tooltips_enabled:
+            day, count = self.data[idx]
+            QToolTip.showText(event.globalPosition().toPoint(),
+                              f"<b>{_esc(day)}</b><br>{count} ×", self)
+        else:
+            QToolTip.hideText()
+
+    def leaveEvent(self, event):
+        if self._hover is not None:
+            self._hover = None
+            self.update()
+        QToolTip.hideText()
+
+    @staticmethod
+    def _top_rounded(rect, r):
+        """A rectangle path with only its two top corners rounded."""
+        r = max(0.0, min(r, rect.width() / 2, rect.height()))
+        path = QPainterPath()
+        path.moveTo(rect.left(), rect.bottom())
+        path.lineTo(rect.left(), rect.top() + r)
+        path.quadTo(rect.left(), rect.top(), rect.left() + r, rect.top())
+        path.lineTo(rect.right() - r, rect.top())
+        path.quadTo(rect.right(), rect.top(), rect.right(), rect.top() + r)
+        path.lineTo(rect.right(), rect.bottom())
+        path.closeSubpath()
+        return path
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         pal = self.palette()
         text_color = pal.color(QPalette.ColorRole.WindowText)
+        accent = pal.color(QPalette.ColorRole.Highlight)
+        base = pal.color(QPalette.ColorRole.Base)
 
-        # Card background
-        card = QRectF(self.rect()).adjusted(2, 2, -2, -2)
+        # Card background with a hairline border for a crisp, modern edge.
+        card = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(pal.color(QPalette.ColorRole.Base))
-        painter.drawRoundedRect(card, 8, 8)
+        painter.setBrush(base)
+        painter.drawRoundedRect(card, 12, 12)
+        border = _mix(base, text_color, 0.16)
+        painter.setPen(border)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(card, 12, 12)
+        painter.setPen(Qt.PenStyle.NoPen)
 
-        inner = card.adjusted(14, 12, -14, -12)
+        inner = card.adjusted(16, 13, -16, -13)
 
         # Title
         title_font = QFont(self.font())
@@ -646,6 +1055,7 @@ class ActivityChart(QWidget):
         painter.setFont(self.font())
 
         if not self.data:
+            self._plot = None
             faded = QColor(text_color)
             faded.setAlpha(130)
             painter.setPen(faded)
@@ -654,7 +1064,7 @@ class ActivityChart(QWidget):
             painter.end()
             return
 
-        top_pad = 28
+        top_pad = 30
         bottom_pad = 26
         chart_top = inner.top() + top_pad
         chart_bottom = inner.bottom() - bottom_pad
@@ -666,27 +1076,44 @@ class ActivityChart(QWidget):
         max_count = max(c for _, c in self.data) or 1
         gap = max(2.0, min(8.0, chart_w / n * 0.25))
         bar_w = max(2.0, (chart_w - gap * (n - 1)) / n)
+        step = bar_w + gap
+        self._plot = (chart_left, chart_top, chart_bottom, step)
 
-        bar_color = QColor(ACCENT)
+        # Faint baseline for the bars to sit on.
+        baseline = _mix(base, text_color, 0.12)
+        painter.setPen(baseline)
+        painter.drawLine(int(chart_left), int(chart_bottom) + 1,
+                         int(chart_left + chart_w), int(chart_bottom) + 1)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        # Gradient endpoints: a vivid accent on top fading to a translucent
+        # version at the baseline, giving the bars depth on any theme.
+        grad_bottom = _mix(accent, base, 0.45)
+        hover_top = _mix(accent, QColor("#ffffff"), 0.25)
         label_color = QColor(text_color)
         label_color.setAlpha(150)
         small_font = QFont(self.font())
         small_font.setPointSizeF(max(7.0, self.font().pointSizeF() - 1.5))
 
-        # Bars (and a count label on top when there is room)
+        # Bars (a count label on top when the bar is wide enough, or on hover)
         for i, (day, count) in enumerate(self.data):
-            bar_h = chart_h * count / max_count
-            x = chart_left + i * (bar_w + gap)
+            bar_h = max(2.0, chart_h * count / max_count)
+            x = chart_left + i * step
             y = chart_bottom - bar_h
+            rect = QRectF(x, y, bar_w, bar_h)
+            hovered = (i == self._hover)
+            grad = QLinearGradient(x, y, x, chart_bottom)
+            grad.setColorAt(0.0, hover_top if hovered else accent)
+            grad.setColorAt(1.0, accent if hovered else grad_bottom)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(bar_color)
-            radius = min(3.0, bar_w / 2)
-            painter.drawRoundedRect(QRectF(x, y, bar_w, bar_h), radius, radius)
-            if bar_w >= 22:
+            painter.setBrush(grad)
+            painter.drawPath(self._top_rounded(rect, min(4.0, bar_w / 2)))
+            if bar_w >= 22 or hovered:
                 painter.setFont(small_font)
-                painter.setPen(text_color)
-                painter.drawText(QRectF(x - 4, y - 16, bar_w + 8, 14),
+                painter.setPen(accent if hovered else text_color)
+                painter.drawText(QRectF(x - 6, y - 16, bar_w + 12, 14),
                                  Qt.AlignmentFlag.AlignCenter, str(count))
+                painter.setPen(Qt.PenStyle.NoPen)
 
         # X-axis labels: first, middle and last day
         painter.setFont(small_font)
@@ -720,17 +1147,29 @@ class MainWindow(QMainWindow):
         self.resize(1040, 740)
 
         central = QWidget()
+        central.setObjectName("central")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(18, 16, 18, 14)
+        root.setSpacing(12)
 
+        # --- Header (title + subtitle) -------------------------------------
+        header = QVBoxLayout()
+        header.setSpacing(1)
         self.title_label = QLabel(tr("title_label"))
         tf = QFont(self.font())
-        tf.setPointSizeF(self.font().pointSizeF() + 4)
+        tf.setPointSizeF(self.font().pointSizeF() + 5)
         tf.setBold(True)
         self.title_label.setFont(tf)
-        root.addWidget(self.title_label)
+        header.addWidget(self.title_label)
+
+        self.subtitle_label = QLabel(tr("subtitle"))
+        self.subtitle_label.setObjectName("subtitle")
+        sf = QFont(self.font())
+        sf.setPointSizeF(max(8.0, self.font().pointSizeF() - 0.5))
+        self.subtitle_label.setFont(sf)
+        header.addWidget(self.subtitle_label)
+        root.addLayout(header)
 
         # --- Toolbar -------------------------------------------------------
         controls = QHBoxLayout()
@@ -755,7 +1194,16 @@ class MainWindow(QMainWindow):
             self.action_combo.addItem(tr(f"act_{key}"), key)
         self.action_combo.currentIndexChanged.connect(self.apply_filters)
 
+        self.tooltip_btn = QPushButton(tr("tooltips_btn"))
+        self.tooltip_btn.setObjectName("toggle")
+        self.tooltip_btn.setCheckable(True)
+        self.tooltip_btn.setChecked(_TOOLTIPS_ENABLED)
+        self.tooltip_btn.setIcon(QIcon.fromTheme("dialog-information"))
+        self.tooltip_btn.setToolTip(tr("tooltips_hint"))
+        self.tooltip_btn.toggled.connect(self.toggle_tooltips)
+
         self.refresh_btn = QPushButton(tr("reload"))
+        self.refresh_btn.setObjectName("primary")
         self.refresh_btn.setIcon(QIcon.fromTheme("view-refresh"))
         self.refresh_btn.clicked.connect(self.load_data)
 
@@ -767,9 +1215,11 @@ class MainWindow(QMainWindow):
         self.lang_btn.setIcon(QIcon.fromTheme("preferences-desktop-locale"))
         self.lang_btn.clicked.connect(self.switch_language)
 
+        controls.setSpacing(8)
         controls.addWidget(self.search_input, 1)
         controls.addWidget(self.source_combo)
         controls.addWidget(self.action_combo)
+        controls.addWidget(self.tooltip_btn)
         controls.addWidget(self.refresh_btn)
         controls.addWidget(self.export_btn)
         controls.addWidget(self.lang_btn)
@@ -815,11 +1265,21 @@ class MainWindow(QMainWindow):
         self.status = self.statusBar()
         self.load_data()
 
+    # ----- Toggles ----------------------------------------------------------
+    def toggle_tooltips(self, enabled):
+        """Enable/disable the hover detail tooltips and remember the choice."""
+        global _TOOLTIPS_ENABLED
+        _TOOLTIPS_ENABLED = enabled
+        self.model.tooltips_enabled = enabled
+        self.chart.tooltips_enabled = enabled
+        _update_config(tooltips=enabled)
+
     # ----- Language switch --------------------------------------------------
     def switch_language(self):
         global _LANG
         _LANG = "de" if _LANG == "en" else "en"
-        _save_config({"lang": _LANG})
+        _update_config(lang=_LANG)
+        _TOOLTIP_CACHE.clear()          # labels are language-specific
         self._retranslate_rows()
         self._retranslate_ui()
         self.apply_filters()
@@ -835,10 +1295,13 @@ class MainWindow(QMainWindow):
         """Update all static UI strings to the active language."""
         self.setWindowTitle(tr("window_title"))
         self.title_label.setText(tr("title_label"))
+        self.subtitle_label.setText(tr("subtitle"))
         self.search_input.setPlaceholderText(tr("search_ph"))
         self.lang_btn.setText(_LANG_NAMES[_LANG])
         self.refresh_btn.setText(tr("reload"))
         self.export_btn.setText(tr("export_csv"))
+        self.tooltip_btn.setText(tr("tooltips_btn"))
+        self.tooltip_btn.setToolTip(tr("tooltips_hint"))
 
         src_key = self.source_combo.currentData()
         self.source_combo.blockSignals(True)
@@ -966,7 +1429,8 @@ class MainWindow(QMainWindow):
             return "&nbsp;&nbsp;&nbsp;".join(out)
 
         sep = " &nbsp;&nbsp;|&nbsp;&nbsp; "
-        html = f"<b>{tr('stats_total')}:</b>&nbsp;{total}"
+        html = (f"<b>{tr('stats_total')}:</b>&nbsp;"
+                f"<b style='color:{_UI['accent']};'>{total}</b>")
         src_html = chips(src_counts, SOURCES, "src_")
         act_html = chips(act_counts, ACTIONS, "act_")
         if src_html:
@@ -1013,13 +1477,16 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    global _LANG
+    global _LANG, _TOOLTIPS_ENABLED
     config = _load_config()
     if config.get("lang") in _T:
         _LANG = config["lang"]
+    if isinstance(config.get("tooltips"), bool):
+        _TOOLTIPS_ENABLED = config["tooltips"]
 
     app = QApplication(sys.argv)
     app.setApplicationName("CachyOS Update History")
+    apply_theme(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
