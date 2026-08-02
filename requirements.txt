@@ -1,3 +1,4 @@
 # Runtime dependency.
+# Requires Python 3.10 or newer.
 # On Arch-based systems prefer the system package instead:  sudo pacman -S python-pyqt6
 PyQt6>=6.5,<7

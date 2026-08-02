@@ -1,0 +1,52 @@
+name: Feature request
+description: Propose a focused improvement or new capability.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Explain the user need independently of a preferred solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the smallest useful behavior change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include existing workflows or simpler approaches.
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Main area
+      options:
+        - Data source or parsing
+        - Filtering, sorting or statistics
+        - Chart, tooltip or other UI
+        - Export
+        - Configuration or translation
+        - Performance
+        - Security or robustness
+        - Documentation or developer workflow
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Compatibility, performance or dependency impact
+      description: Note new commands, data access or dependencies if applicable.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: The proposal does not require the app to run as root.
+          required: true
