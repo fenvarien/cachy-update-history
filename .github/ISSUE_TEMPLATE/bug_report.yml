@@ -1,0 +1,94 @@
+name: Bug report
+description: Report reproducible incorrect or unexpected application behavior.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve CachyOS Update History. Do not include
+        sensitive package inventories, home paths or exploit details. Use the
+        Security policy for vulnerabilities.
+  - type: dropdown
+    id: distribution
+    attributes:
+      label: Distribution
+      options:
+        - CachyOS
+        - Arch Linux
+        - EndeavourOS
+        - Manjaro
+        - Other Arch-based distribution
+        - Other distribution
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+      description: Release tag or output of `git rev-parse --short HEAD`.
+      placeholder: v1.1.0 or 8266359
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Python, PyQt6 and Qt versions
+      placeholder: Python 3.14.6, PyQt6 6.11.0, Qt 6.11.1
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Affected data source or area
+      multiple: true
+      options:
+        - Pacman
+        - AUR classification
+        - Flatpak
+        - Filtering or sorting
+        - Chart or tooltips
+        - CSV export
+        - Configuration or language
+        - Desktop integration
+        - Other UI behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use minimal, sanitized sample data where possible.
+      placeholder: |
+        1. Start the app with ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Include relevant terminal output only; remove personal data.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues for this behavior.
+          required: true
+        - label: I removed personal/sensitive data from this report.
+          required: true
+        - label: This is not a privately reportable security vulnerability.
+          required: true

@@ -1,197 +1,124 @@
 # CachyOS Update History
 
-A small, dependency-light **PyQt6** desktop app that brings your package update
-history from **Pacman**, the **AUR** and **Flatpak** into a single, sortable
-view — with colored badges and a per-day activity chart.
+A small, dependency-light PyQt6 desktop app that combines package changes from
+Pacman, the AUR and Flatpak in one sortable timeline.
 
-Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
-(Arch, EndeavourOS, Manjaro, …) and degrades gracefully elsewhere.
+Built for [CachyOS](https://cachyos.org/) and other Arch-based distributions.
+On systems without Pacman or Flatpak, unavailable sources are skipped without
+preventing the rest of the app from loading.
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41cd52)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)
 [![Release](https://img.shields.io/github/v/release/fenvarien/cachy-update-history)](https://github.com/fenvarien/cachy-update-history/releases/latest)
 
-> 🎉 **v1.1.0 is out!** Hover any row for on-demand package details, toggleable
-> via the new **Details** button, plus a modern UI restyled from your system's
-> accent color for a native look on KDE and GNOME.
-> See the [release notes](https://github.com/fenvarien/cachy-update-history/releases/tag/v1.1.0).
+![English UI with a package-detail tooltip](docs/screenshot-en.png)
 
-![English UI — with a package detail tooltip](docs/screenshot-en.png)
-*English UI — hover a row for package details*
+*English interface with on-demand package details.*
 
-![German UI — with a package detail tooltip](docs/screenshot.png)
-*German UI — hover a row for package details*
+![German UI with a package-detail tooltip](docs/screenshot.png)
 
-## Features
+*German interface; language and tooltip preferences persist across restarts.*
 
-- **Three sources in one place** — Pacman / official repos, AUR and Flatpak,
-  each marked with its own colored badge.
-- **Filter by text, source and action** — all three combine; filtering is
-  instant even on large logs (it runs through Qt's view proxy, not a rebuild).
-- **Package detail tooltips** — hover any row to see richer information about
-  the package (description, version, license, installed size, repository /
-  origin, install date, website — via `pacman -Qi` / `flatpak info`). Queried
-  lazily in a background worker and kept in a bounded cache, so slow package
-  tools never freeze the UI. Toggle it on/off with the **Details** button; the
-  choice is remembered across restarts.
-- **Activity chart** — a packages-per-day bar chart that follows the active
-  filter (pure `QPainter`, no extra dependencies), with gradient bars and a
-  hover readout of the exact date and count.
-- **Sortable columns** — click any header; the date column sorts chronologically.
-- **CSV export** of the current (filtered + sorted) view.
-- **Language switching** — toggle between English and German at runtime; the
-  chosen language is remembered across restarts.
-- **Native, theme-aware design** — the whole UI is styled from the system
-  palette and its **accent color**, so it fits right in on both KDE/Breeze and
-  GNOME/Adwaita and adapts automatically to light and dark themes.
+## Highlights
 
-## How the sources are detected
+- Pacman, AUR and Flatpak changes in one model/view-based table.
+- Combined text, source and action filters with chronological sorting.
+- Per-day activity chart that follows the active filter.
+- Package details loaded on demand without blocking the interface.
+- CSV export of the current filtered and sorted view.
+- English and German UI with native light/dark palette integration.
+- No root privileges, network service or background daemon required.
 
-| Source  | Where the data comes from |
-|---------|--------------------------|
-| Pacman  | Parsed from `/var/log/pacman.log` (`[ALPM]` upgrade/install/… lines). |
-| AUR     | A pacman-log entry is flagged as AUR when the package is **currently** installed as a *foreign* package (`pacman -Qmq`). |
-| Flatpak | Combined from `flatpak history --system/--user` plus a fallback entry per installed app from `flatpak list` (so every app appears even if its history is empty). |
+## Quick start
 
-> **Note on AUR detection.** The pacman log itself does not record which
-> repository a package came from. The "foreign package" heuristic is the most
-> reliable signal available without an external database. The trade-off: AUR
-> packages you have since *removed*, or packages that later *moved into the
-> official repos*, will appear as **Pacman** in the history.
+Requirements:
 
-## Requirements
+- Python 3.10 or newer;
+- PyQt6;
+- optionally the `pacman` executable for AUR classification/live details and
+  `flatpak` for the Flatpak source.
 
-- Python 3.10+ (Python 3.9 is end-of-life and no longer receives security fixes)
-- PyQt6
-- Optional: `flatpak` (for the Flatpak source) and `pacman` (for AUR detection).
-  If either is missing, that source is simply skipped.
+On CachyOS or Arch Linux:
 
-`/var/log/pacman.log` is world-readable on Arch by default, so **no root /
-sudo is required** to run the app.
-
-## Security &amp; robustness
-
-The app reads system data it does not control (logs, `flatpak`/`pacman`
-output), so it is written defensively:
-
-- **No shell or option injection** — external tools are resolved to absolute
-  paths and invoked with explicit argument lists (never a shell string), with
-  package names separated from command options.
-- **CSV export is injection-safe** — cells beginning with `=`, `+`, `-`, `@` or
-  a control character are prefixed with a quote, so a crafted package name or
-  version can't be executed as a formula when the CSV is opened in Excel or
-  LibreOffice.
-- **Private atomic config writes** — preferences are written through a random,
-  mode-`0600` temp file and renamed into place, avoiding symlink/collision
-  hazards and truncated configuration files.
-- **Defensive source parsing** — Flatpak application IDs are validated before
-  they are used in filesystem paths or glob patterns.
-- **Responsive I/O** — Pacman/Flatpak reads and detail queries run in a bounded
-  worker pool. `pacman.log` is streamed line by line rather than loaded whole,
-  keeping temporary parsing overhead low even for large logs.
-
-## Installation
-
-### Arch / CachyOS (recommended)
-
-Install PyQt6 from the official repositories and run the script directly:
-
-```bash
+```text
 sudo pacman -S python-pyqt6
 git clone https://github.com/fenvarien/cachy-update-history.git
 cd cachy-update-history
-python cachy-update-history.py
+python3 cachy-update-history.py
 ```
 
-### Other distributions (virtual environment)
+With a virtual environment on another distribution:
 
-```bash
+```text
 git clone https://github.com/fenvarien/cachy-update-history.git
 cd cachy-update-history
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python cachy-update-history.py
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python cachy-update-history.py
 ```
 
-## Usage
+The virtual-environment commands do not require shell activation and therefore
+work unchanged in fish, Bash and Zsh.
 
-Start the app:
+## Data sources
 
-```bash
-python cachy-update-history.py
-```
+| Source | Data and classification |
+| --- | --- |
+| Pacman | Matching `[ALPM]` entries streamed from `/var/log/pacman.log`. |
+| AUR | Pacman-log packages currently reported as foreign by `pacman -Qmq`. |
+| Flatpak | System and user history for currently installed apps, plus one fallback entry when an app has no history. |
 
-- Type in the search box to filter packages (matches the package name, source
-  and action). Use the **source** and **action** dropdowns to narrow further;
-  all three filters combine.
-- Click a column header to sort; click again to reverse.
-- Hover a row to see detailed package info in a tooltip; use the **Details**
-  button to turn these tooltips on or off.
-- **Reload** re-reads all sources; **Export CSV** saves the current view.
-- **English / Deutsch** button switches the UI language at runtime.
+AUR classification is necessarily a current-state heuristic: the Pacman log
+does not record the original repository. Removed AUR packages and packages that
+later moved into an official repository can therefore appear as Pacman.
 
-## Desktop integration
+For exact field semantics, fallback behavior and known limitations, see the
+[User guide](docs/USER_GUIDE.md).
 
-To launch it from your application menu, copy the script somewhere stable and
-install the provided desktop entry:
+## Documentation
 
-```bash
-mkdir -p ~/.local/bin ~/.local/share/applications
-cp cachy-update-history.py ~/.local/bin/
-cp cachy-update-history.desktop ~/.local/share/applications/
-```
+| Document | Purpose |
+| --- | --- |
+| [User guide](docs/USER_GUIDE.md) | Installation, operation, configuration, data semantics and troubleshooting. |
+| [Architecture](docs/ARCHITECTURE.md) | Data flow, threading, normalized records, security boundaries and extension points. |
+| [Changelog](CHANGELOG.md) | Released versions and changes currently on `master`. |
+| [Contributing](CONTRIBUTING.md) | Development setup, required checks and documentation maintenance rules. |
+| [Security policy](SECURITY.md) | Supported versions, threat model and vulnerability reporting. |
 
-Then edit the `Exec=` line in `~/.local/share/applications/cachy-update-history.desktop`
-to match the path above (replace `YOUR_USERNAME`). After a few seconds the entry
-"Update History" appears in your menu.
+## Security and performance
 
-## Configuration
+The app treats logs and package-tool output as untrusted input. External tools
+are invoked without a shell, package arguments are separated from options,
+Flatpak IDs are validated before filesystem use, rich text is escaped and CSV
+formula prefixes are neutralized. Preferences use bounded parsing and private,
+atomic writes.
 
-The log path is defined near the top of `cachy-update-history.py`:
+Potentially slow log and subprocess work runs in a bounded Qt worker pool.
+Search strings are normalized once per record, and both tooltip cache and queue
+have fixed limits. See [Security policy](SECURITY.md) and
+[Architecture](docs/ARCHITECTURE.md) for the maintained guarantees and residual
+risks.
 
-```python
-LOG_PATH = "/var/log/pacman.log"
-```
+## Project status
 
-Badge colors for sources and actions live in the `SOURCES` and `ACTIONS`
-dictionaries right below it, so you can re-theme the app in one place.
+The latest stable version is published on the
+[GitHub Releases page](https://github.com/fenvarien/cachy-update-history/releases/latest).
+Changes merged after that release are documented under
+[`Unreleased`](CHANGELOG.md#unreleased).
 
-User preferences — the active language and whether detail tooltips are enabled
-— are saved to `~/.config/cachy-update-history.json` and restored on next
-launch.
-
-## Limitations
-
-- AUR detection is a current-state heuristic (see the note above).
-- Flatpak entries reflect **currently installed** apps (one row each), not a
-  full per-update history. The date is the deploy directory's mtime, i.e. the
-  last install/update.
-- The chart shows the 30 most recent days that have activity.
-
-## Project structure
-
-```
-cachy-update-history/
-├── cachy-update-history.py        # the application (single file)
-├── cachy-update-history.desktop   # optional menu launcher
-├── tests/test_app.py              # security, parser and performance regressions
-├── requirements.txt
-├── README.md
-├── LICENSE
-└── .gitignore
-```
+The application remains intentionally small: PyQt6 is its only required runtime
+dependency, and the test suite uses Python's standard library.
 
 ## Contributing
 
-Issues and pull requests are welcome. The whole app is a single, commented
-Python file, so it is easy to read and extend (for example: adding `apt`,
-`snap`, or `npm -g` as further sources, or coloring the chart bars per source).
+Issues and pull requests are welcome. Before changing a data source, threading,
+security behavior or user-facing workflow, read [CONTRIBUTING.md](CONTRIBUTING.md)
+and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Run the test suite without additional test dependencies:
+Run the regression suite with:
 
-```bash
+```text
 python3 -m unittest discover -s tests -v
 ```
 

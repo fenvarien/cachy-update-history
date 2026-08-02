@@ -32,11 +32,11 @@ history from several sources in one place:
 
 Features
 --------
-  * Colored badges for both the source and the action (theme-aware: works on
-    light and dark KDE/Breeze themes)
+  * Theme-aware source/action badges and native palette/accent styling
   * Filter by text, by source and by action; all combine
   * Activity chart (packages per day) that follows the active filter
   * Sortable columns (click a header)
+  * On-demand package details queried outside the GUI thread
   * CSV export of the current view
   * Language switch (English / Deutsch)
 
@@ -50,12 +50,18 @@ official repositories:
 
 On other distributions, use a virtual environment:
 
-    python -m venv .venv && source .venv/bin/activate
-    pip install PyQt6
+    python3 -m venv .venv
+    .venv/bin/python -m pip install -r requirements.txt
 
 Run
 ---
-    python cachy-update-history.py
+    python3 cachy-update-history.py
+
+Project documentation
+---------------------
+See README.md for the entry point, docs/USER_GUIDE.md for behavior and
+troubleshooting, and docs/ARCHITECTURE.md for data flow, threading, security
+boundaries and extension rules.
 
 Note on AUR detection
 ---------------------
