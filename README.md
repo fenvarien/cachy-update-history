@@ -7,7 +7,7 @@ view — with colored badges and a per-day activity chart.
 Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 (Arch, EndeavourOS, Manjaro, …) and degrades gracefully elsewhere.
 
-![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41cd52)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)
 [![Release](https://img.shields.io/github/v/release/fenvarien/cachy-update-history)](https://github.com/fenvarien/cachy-update-history/releases/latest)
@@ -32,8 +32,9 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 - **Package detail tooltips** — hover any row to see richer information about
   the package (description, version, license, installed size, repository /
   origin, install date, website — via `pacman -Qi` / `flatpak info`). Queried
-  lazily and cached, so it never slows down loading. Toggle it on/off with the
-  **Details** button; the choice is remembered across restarts.
+  lazily in a background worker and kept in a bounded cache, so slow package
+  tools never freeze the UI. Toggle it on/off with the **Details** button; the
+  choice is remembered across restarts.
 - **Activity chart** — a packages-per-day bar chart that follows the active
   filter (pure `QPainter`, no extra dependencies), with gradient bars and a
   hover readout of the exact date and count.
@@ -61,7 +62,7 @@ Built for [CachyOS](https://cachyos.org/), but works on any Arch-based system
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+ (Python 3.9 is end-of-life and no longer receives security fixes)
 - PyQt6
 - Optional: `flatpak` (for the Flatpak source) and `pacman` (for AUR detection).
   If either is missing, that source is simply skipped.
@@ -74,16 +75,21 @@ sudo is required** to run the app.
 The app reads system data it does not control (logs, `flatpak`/`pacman`
 output), so it is written defensively:
 
-- **No shell injection** — external tools are invoked with explicit argument
-  lists (never a shell string), so package names can't break out of a command.
+- **No shell or option injection** — external tools are resolved to absolute
+  paths and invoked with explicit argument lists (never a shell string), with
+  package names separated from command options.
 - **CSV export is injection-safe** — cells beginning with `=`, `+`, `-`, `@` or
   a control character are prefixed with a quote, so a crafted package name or
   version can't be executed as a formula when the CSV is opened in Excel or
   LibreOffice.
-- **Atomic config writes** — the language setting is written to a temp file and
-  renamed into place, so an interrupted write can't leave a corrupt config.
-- **Memory-safe log reading** — `pacman.log` is streamed line by line rather
-  than loaded whole, keeping memory flat no matter how large the log grows.
+- **Private atomic config writes** — preferences are written through a random,
+  mode-`0600` temp file and renamed into place, avoiding symlink/collision
+  hazards and truncated configuration files.
+- **Defensive source parsing** — Flatpak application IDs are validated before
+  they are used in filesystem paths or glob patterns.
+- **Responsive I/O** — Pacman/Flatpak reads and detail queries run in a bounded
+  worker pool. `pacman.log` is streamed line by line rather than loaded whole,
+  keeping temporary parsing overhead low even for large logs.
 
 ## Installation
 
@@ -170,6 +176,7 @@ launch.
 cachy-update-history/
 ├── cachy-update-history.py        # the application (single file)
 ├── cachy-update-history.desktop   # optional menu launcher
+├── tests/test_app.py              # security, parser and performance regressions
 ├── requirements.txt
 ├── README.md
 ├── LICENSE
@@ -181,6 +188,12 @@ cachy-update-history/
 Issues and pull requests are welcome. The whole app is a single, commented
 Python file, so it is easy to read and extend (for example: adding `apt`,
 `snap`, or `npm -g` as further sources, or coloring the chart bars per source).
+
+Run the test suite without additional test dependencies:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ## License
 
