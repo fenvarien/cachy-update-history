@@ -42,8 +42,9 @@ Features
 
 Dependencies
 ------------
-The only runtime dependency is PyQt6. On Arch-based systems (CachyOS, Arch,
-EndeavourOS, ...) install it from the official repositories:
+Python 3.10 or newer is required. The only runtime dependency is PyQt6. On
+Arch-based systems (CachyOS, Arch, EndeavourOS, ...) install it from the
+official repositories:
 
     sudo pacman -S python-pyqt6
 
@@ -74,6 +75,7 @@ import glob
 import json
 import shutil
 import subprocess
+import tempfile
 from collections import OrderedDict, Counter
 from datetime import datetime
 from html import escape as _esc
@@ -86,10 +88,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import (
     QColor, QPainter, QFont, QIcon, QPalette, QLinearGradient, QPainterPath,
+    QCursor,
 )
 from PyQt6.QtCore import (
     Qt, QRectF, QSize, QTimer, QAbstractTableModel, QModelIndex,
-    QSortFilterProxyModel,
+    QSortFilterProxyModel, QObject, QRunnable, QThreadPool, pyqtSignal,
 )
 
 LOG_PATH = "/var/log/pacman.log"
@@ -99,29 +102,45 @@ ACCENT = "#3DAEE9"
 _LANG = "en"
 _LANG_NAMES = {"en": "English", "de": "Deutsch"}
 _CONFIG_PATH = os.path.expanduser("~/.config/cachy-update-history.json")
+_CONFIG_MAX_BYTES = 64 * 1024
 
 
 def _load_config():
     try:
-        with open(_CONFIG_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        with open(_CONFIG_PATH, "rb") as f:
+            raw = f.read(_CONFIG_MAX_BYTES + 1)
+        if len(raw) > _CONFIG_MAX_BYTES:
+            return {}
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeError,
+            RecursionError):
         return {}
 
 
 def _save_config(data):
-    # Write atomically (temp file + rename) so an interrupted write can never
-    # leave a truncated, unparseable config behind.
-    tmp = _CONFIG_PATH + ".tmp"
+    """Write the config atomically through a private, unpredictable file."""
+    config_dir = os.path.dirname(_CONFIG_PATH)
+    tmp = None
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        os.makedirs(config_dir, mode=0o700, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            prefix=".cachy-update-history-", suffix=".tmp", dir=config_dir,
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, _CONFIG_PATH)
-    except OSError:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        tmp = None
+    except (OSError, TypeError):
+        pass
+    finally:
+        if tmp is not None:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _update_config(**changes):
@@ -152,6 +171,8 @@ _T = {
         "status_entries":  "entries",
         "status_show":     "showing",
         "status_of":       "of",
+        "status_loading":  "Loading package history …",
+        "load_failed":     "Package history could not be loaded: {error}",
         "flatpak_missing": "(flatpak not installed)",
         "flatpak_empty":   "(no Flatpak apps found)",
         "export_dlg":      "Export",
@@ -182,6 +203,7 @@ _T = {
         "tt_url":          "Website",
         "tt_origin":       "Origin",
         "tt_runtime":      "Runtime",
+        "tt_loading":      "Loading package details …",
         "tt_not_installed": "Not currently installed — showing log data only.",
     },
     "de": {
@@ -201,6 +223,8 @@ _T = {
         "status_entries":  "Einträge",
         "status_show":     "Zeige",
         "status_of":       "von",
+        "status_loading":  "Paketverlauf wird geladen …",
+        "load_failed":     "Paketverlauf konnte nicht geladen werden: {error}",
         "flatpak_missing": "(Flatpak nicht installiert)",
         "flatpak_empty":   "(keine Flatpak-Apps gefunden)",
         "export_dlg":      "Export",
@@ -231,13 +255,15 @@ _T = {
         "tt_url":          "Webseite",
         "tt_origin":       "Quelle",
         "tt_runtime":      "Runtime",
+        "tt_loading":      "Paketdetails werden geladen …",
         "tt_not_installed": "Derzeit nicht installiert — es werden nur Log-Daten angezeigt.",
     },
 }
 
 
-def tr(key):
-    return _T[_LANG].get(key, _T["en"].get(key, key))
+def tr(key, lang=None):
+    lang = lang if lang in _T else _LANG
+    return _T[lang].get(key, _T["en"].get(key, key))
 
 
 # Sources. The order here drives the order in the statistics.
@@ -265,6 +291,22 @@ ACTION_PATTERN = re.compile(
     r"(?P<action>upgraded|downgraded|installed|reinstalled|removed) "
     r"(?P<pkg>\S+) \((?P<ver>[^)]*)\)"
 )
+
+# Flatpak IDs are used as path components when locating deployment metadata.
+# Reject separators and glob metacharacters even if a compromised/malformed
+# flatpak command produces output that violates Flatpak's own ID rules.
+FLATPAK_APP_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+
+
+def _valid_flatpak_app_id(appid):
+    return (isinstance(appid, str) and "." in appid
+            and FLATPAK_APP_ID_PATTERN.fullmatch(appid) is not None)
+
+
+def _command_path(name):
+    """Resolve a command once per invocation and return an absolute path."""
+    path = shutil.which(name)
+    return os.path.realpath(path) if path else None
 
 
 def parse_timestamp(raw):
@@ -321,7 +363,7 @@ def _csv_safe(value):
     with a single quote forces it to be treated as plain text.
     """
     s = "" if value is None else str(value)
-    if s[:1] in ("=", "+", "-", "@", "\t", "\r"):
+    if s and (s[0] in ("=", "+", "-", "@") or ord(s[0]) < 32):
         return "'" + s
     return s
 
@@ -331,8 +373,11 @@ def get_foreign_packages():
 
     Uses `pacman -Qmq`. Returns an empty set if pacman is unavailable.
     """
+    pacman = _command_path("pacman")
+    if pacman is None:
+        return set()
     try:
-        out = subprocess.run(["pacman", "-Qmq"], capture_output=True,
+        out = subprocess.run([pacman, "-Qmq"], capture_output=True,
                              text=True, timeout=10)
         if out.returncode == 0:
             return set(out.stdout.split())
@@ -343,11 +388,12 @@ def get_foreign_packages():
 
 def _run_flatpak(args):
     """Run a flatpak subcommand with a stable (C) locale; return stdout or ""."""
-    if not shutil.which("flatpak"):
+    flatpak = _command_path("flatpak")
+    if flatpak is None:
         return ""
     env = {**os.environ, "LC_ALL": "C"}
     try:
-        out = subprocess.run(["flatpak", *args], capture_output=True,
+        out = subprocess.run([flatpak, *args], capture_output=True,
                              text=True, timeout=20, env=env)
         if out.returncode == 0:
             return out.stdout
@@ -371,6 +417,8 @@ def _flatpak_deploy_mtime(appid):
     Reads the mtime of the app's active deploy symlink. Returns None if the
     deploy directory cannot be located (e.g. unusual custom installation).
     """
+    if not _valid_flatpak_app_id(appid):
+        return None
     newest = 0.0
     for base in FLATPAK_BASE_DIRS:
         appdir = os.path.join(base, "app", appid)
@@ -413,8 +461,9 @@ def read_flatpak_installed():
     installed = []
     for line in text.splitlines():
         parts = _split_columns(line)
-        # Real application IDs are reverse-DNS (contain a dot); skips the header.
-        if not parts or "." not in parts[0]:
+        # Real application IDs are reverse-DNS; this also skips the header and
+        # prevents unsafe values from reaching filesystem path/glob handling.
+        if not parts or not _valid_flatpak_app_id(parts[0]):
             continue
         app = parts[0]
         version = parts[1] if len(parts) > 1 else ""
@@ -460,7 +509,7 @@ def parse_flatpak_history_text(text):
         time_s = fields[0]
         app = fields[-1]
         change_s = " ".join(fields[1:-1])
-        if "." not in app:          # skip header / non-app rows
+        if not _valid_flatpak_app_id(app):  # skip header / unsafe non-app rows
             continue
         action = _flatpak_change_action(change_s)
         if action is None:
@@ -502,7 +551,7 @@ def read_flatpak_all():
     History is filtered to installed app IDs only — `flatpak history` also
     includes runtimes and locale extensions that are not user-facing apps.
     """
-    if not shutil.which("flatpak"):
+    if _command_path("flatpak") is None:
         return []
     installed = read_flatpak_installed()
     app_ids = {rec["pkg"] for rec in installed}
@@ -510,6 +559,50 @@ def read_flatpak_all():
     seen = {r["pkg"] for r in history}
     extra = [rec for rec in installed if rec["pkg"] not in seen]
     return history + extra
+
+
+def collect_update_data(log_path):
+    """Collect raw records without touching Qt widgets.
+
+    This function deliberately contains all potentially slow filesystem and
+    subprocess work so it can run outside the GUI thread.
+    """
+    data = []
+    log_error = None
+    foreign = get_foreign_packages()
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = ACTION_PATTERN.search(line)
+                if not m:
+                    continue
+                action = m.group("action")
+                pkg = m.group("pkg")
+                old, new = split_version(action, m.group("ver"))
+                data.append({
+                    "dt": parse_timestamp(m.group("ts")),
+                    "action_key": action,
+                    "pkg": pkg,
+                    "old": old,
+                    "new": new,
+                    "source_key": "aur" if pkg in foreign else "pacman",
+                })
+    except FileNotFoundError:
+        log_error = ("file_not_found", log_path)
+    except PermissionError:
+        log_error = ("permission", log_path)
+    except OSError:
+        log_error = ("cannot_read", log_path)
+
+    flatpak_available = _command_path("flatpak") is not None
+    flatpak_rows = read_flatpak_all() if flatpak_available else []
+    data.extend(flatpak_rows)
+    return {
+        "rows": data,
+        "log_error": log_error,
+        "flatpak_available": flatpak_available,
+        "has_flatpak_rows": bool(flatpak_rows),
+    }
 
 
 # ─── Theme / palette-derived colors ─────────────────────────────────────────
@@ -675,9 +768,12 @@ QStatusBar::item {{ border:none; }}
 # ─── Package detail tooltips ────────────────────────────────────────────────
 # Rich, on-demand package information shown when the user hovers over a row.
 # The underlying `pacman -Qi` / `flatpak info` calls are relatively slow, so the
-# result is queried lazily (only on first hover) and cached — it never blocks
-# data loading and runs at most once per package.
-_TOOLTIP_CACHE = {}
+# result is queried lazily (only on first hover) in a worker and cached without
+# blocking the GUI. The LRU limit prevents an unbounded memory footprint.
+_TOOLTIP_CACHE_LIMIT = 256
+_TOOLTIP_QUEUE_LIMIT = 12
+_TOOLTIP_CACHE = OrderedDict()
+_TOOLTIP_MISSING = object()
 
 
 def _query_kv(args):
@@ -739,42 +835,48 @@ def _tt_row(label, value):
             f"<td style='vertical-align:top;'>{value}</td></tr>")
 
 
-def _pkg_fields(rec):
+def _pkg_fields(rec, lang=None):
     """Query and return the (label, value) detail rows for a package.
 
     Returns a list of pairs, or None when the package could not be queried
     (uninstalled / tool missing), so the caller can show a fallback note.
     """
     if rec["source_key"] == "flatpak":
-        parsed = _query_kv(["flatpak", "info", rec["pkg"]])
+        flatpak = _command_path("flatpak")
+        if flatpak is None:
+            return None
+        parsed = _query_kv([flatpak, "info", "--", rec["pkg"]])
         if not parsed:
             return None
         title, info = parsed
         desc = title.split(" - ", 1)[1] if title and " - " in title else ""
         return [
-            (tr("tt_description"), desc),
-            (tr("tt_version"),     info.get("Version")),
-            (tr("tt_licenses"),    info.get("License")),
-            (tr("tt_size"),        info.get("Installed Size")),
-            (tr("tt_origin"),      info.get("Origin")),
-            (tr("tt_runtime"),     info.get("Runtime")),
+            (tr("tt_description", lang), desc),
+            (tr("tt_version", lang),     info.get("Version")),
+            (tr("tt_licenses", lang),    info.get("License")),
+            (tr("tt_size", lang),        info.get("Installed Size")),
+            (tr("tt_origin", lang),      info.get("Origin")),
+            (tr("tt_runtime", lang),     info.get("Runtime")),
         ]
-    parsed = _query_kv(["pacman", "-Qi", rec["pkg"]])
+    pacman = _command_path("pacman")
+    if pacman is None:
+        return None
+    parsed = _query_kv([pacman, "-Qi", "--", rec["pkg"]])
     if not parsed:
         return None
     _title, info = parsed
     return [
-        (tr("tt_description"),  info.get("Description")),
-        (tr("tt_repository"),   info.get("Installed From") or info.get("Repository")),
-        (tr("tt_version"),      info.get("Version")),
-        (tr("tt_licenses"),     info.get("Licenses")),
-        (tr("tt_size"),         info.get("Installed Size")),
-        (tr("tt_install_date"), info.get("Install Date")),
-        (tr("tt_url"),          info.get("URL")),
+        (tr("tt_description", lang),  info.get("Description")),
+        (tr("tt_repository", lang),   info.get("Installed From") or info.get("Repository")),
+        (tr("tt_version", lang),      info.get("Version")),
+        (tr("tt_licenses", lang),     info.get("Licenses")),
+        (tr("tt_size", lang),         info.get("Installed Size")),
+        (tr("tt_install_date", lang), info.get("Install Date")),
+        (tr("tt_url", lang),          info.get("URL")),
     ]
 
 
-def _render_tooltip(rec):
+def _render_tooltip(rec, lang=None):
     """Build the full rich-text (HTML) tooltip for one log record."""
     accent = _UI["accent"]
     muted = _UI["muted"]
@@ -794,13 +896,13 @@ def _render_tooltip(rec):
     rows = []
     change = _version_change(rec)
     if change:
-        rows.append(_tt_row(tr("tt_change"), change))
+        rows.append(_tt_row(tr("tt_change", lang), change))
 
-    fields = _pkg_fields(rec)
+    fields = _pkg_fields(rec, lang)
     if fields is None:
         rows.append(
             f"<tr><td colspan='2' style='color:{muted};padding-top:3px;'>"
-            f"{_esc(tr('tt_not_installed'))}</td></tr>")
+            f"{_esc(tr('tt_not_installed', lang))}</td></tr>")
     else:
         for label, value in fields:
             if value and value.strip() and value.strip() != "None":
@@ -811,14 +913,72 @@ def _render_tooltip(rec):
     return header + table
 
 
-def tooltip_for(rec):
-    """Cached rich-text tooltip for a record (keyed by package + language)."""
-    key = (rec["source_key"], rec["pkg"], _LANG)
-    html = _TOOLTIP_CACHE.get(key)
-    if html is None:
-        html = _render_tooltip(rec)
-        _TOOLTIP_CACHE[key] = html
+def _tooltip_key(rec, lang=None):
+    return rec["source_key"], rec["pkg"], lang or _LANG
+
+
+def _tooltip_cache_get(key):
+    html = _TOOLTIP_CACHE.get(key, _TOOLTIP_MISSING)
+    if html is not _TOOLTIP_MISSING:
+        _TOOLTIP_CACHE.move_to_end(key)
     return html
+
+
+def _tooltip_cache_put(key, html):
+    _TOOLTIP_CACHE[key] = html
+    _TOOLTIP_CACHE.move_to_end(key)
+    while len(_TOOLTIP_CACHE) > _TOOLTIP_CACHE_LIMIT:
+        _TOOLTIP_CACHE.popitem(last=False)
+
+
+def tooltip_for(rec, lang=None):
+    """Synchronously build/cache a tooltip; workers use the same primitives."""
+    lang = lang or _LANG
+    key = _tooltip_key(rec, lang)
+    html = _tooltip_cache_get(key)
+    if html is _TOOLTIP_MISSING:
+        html = _render_tooltip(rec, lang)
+        _tooltip_cache_put(key, html)
+    return html
+
+
+class _LoadSignals(QObject):
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+
+class _LoadWorker(QRunnable):
+    def __init__(self, log_path):
+        super().__init__()
+        self.log_path = log_path
+        self.signals = _LoadSignals()
+
+    def run(self):
+        try:
+            self.signals.completed.emit(collect_update_data(self.log_path))
+        except Exception as exc:  # keep unexpected I/O/tool failures out of Qt
+            self.signals.failed.emit(str(exc))
+
+
+class _TooltipSignals(QObject):
+    completed = pyqtSignal(object, str)
+    failed = pyqtSignal(object)
+
+
+class _TooltipWorker(QRunnable):
+    def __init__(self, key, rec, lang):
+        super().__init__()
+        self.key = key
+        self.rec = dict(rec)
+        self.lang = lang
+        self.signals = _TooltipSignals()
+
+    def run(self):
+        try:
+            html = _render_tooltip(self.rec, self.lang)
+            self.signals.completed.emit(self.key, html)
+        except Exception:
+            self.signals.failed.emit(self.key)
 
 
 # Custom item-data roles used by the model below.
@@ -833,6 +993,8 @@ class UpdateTableModel(QAbstractTableModel):
     the view only renders the handful of currently visible rows, so filtering
     a 50 k-entry history is just a model reset — no per-cell widget creation.
     """
+    tooltip_requested = pyqtSignal(object, object)
+
     # Column -> key in the record dict for the display text.
     _COLS = ("display", "source_label", "action_label", "pkg", "old", "new")
 
@@ -840,6 +1002,7 @@ class UpdateTableModel(QAbstractTableModel):
         super().__init__()
         self.rows = []
         self.tooltips_enabled = _TOOLTIPS_ENABLED
+        self._pending_tooltips = set()
         self._bold = QFont()
         self._bold.setBold(True)
 
@@ -880,8 +1043,18 @@ class UpdateTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.FontRole and col == 3:
             return self._bold
         if role == Qt.ItemDataRole.ToolTipRole and self.tooltips_enabled:
-            return tooltip_for(row)                # lazily queried + cached
+            key = _tooltip_key(row)
+            html = _tooltip_cache_get(key)
+            if html is not _TOOLTIP_MISSING:
+                return html
+            if key not in self._pending_tooltips:
+                self._pending_tooltips.add(key)
+                self.tooltip_requested.emit(key, row)
+            return tr("tt_loading")
         return None
+
+    def tooltip_finished(self, key):
+        self._pending_tooltips.discard(key)
 
 
 class UpdateFilterProxy(QSortFilterProxyModel):
@@ -899,7 +1072,7 @@ class UpdateFilterProxy(QSortFilterProxyModel):
         self._action_key = None
 
     def set_filters(self, text, source_key, action_key):
-        self._text = text.lower().strip()
+        self._text = text.casefold().strip()
         self._source_key = source_key
         self._action_key = action_key
         self.invalidateFilter()
@@ -910,7 +1083,10 @@ class UpdateFilterProxy(QSortFilterProxyModel):
         if self._action_key and rec["action_key"] != self._action_key:
             return False
         if self._text:
-            hay = f"{rec['pkg']} {rec['source_label']} {rec['action_label']}".lower()
+            hay = rec.get("search_text")
+            if hay is None:
+                hay = (f"{rec['pkg']} {rec['source_label']} "
+                       f"{rec['action_label']}").casefold()
             if self._text not in hay:
                 return False
         return True
@@ -1141,6 +1317,11 @@ class MainWindow(QMainWindow):
         self._src_counts = {}
         self._flatpak_available = False
         self._has_flatpak_rows = False
+        self._log_error = None
+        self._load_worker = None
+        self._tooltip_workers = {}
+        self._worker_pool = QThreadPool(self)
+        self._worker_pool.setMaxThreadCount(3)
 
         self.setWindowTitle(tr("window_title"))
         self.setWindowIcon(QIcon.fromTheme("system-software-update"))
@@ -1237,6 +1418,7 @@ class MainWindow(QMainWindow):
 
         # --- Table (model/view for speed) ----------------------------------
         self.model = UpdateTableModel()
+        self.model.tooltip_requested.connect(self._queue_tooltip)
         self.proxy = UpdateFilterProxy()
         self.proxy.setSourceModel(self.model)
 
@@ -1284,11 +1466,18 @@ class MainWindow(QMainWindow):
         self._retranslate_ui()
         self.apply_filters()
 
+    @staticmethod
+    def _translate_row(row):
+        row["action_label"] = tr(f"act_{row['action_key']}")
+        row["source_label"] = tr(f"src_{row['source_key']}")
+        row["search_text"] = (
+            f"{row['pkg']} {row['source_label']} {row['action_label']}"
+        ).casefold()
+
     def _retranslate_rows(self):
         """Update translated display labels in all loaded records."""
         for row in self.all_data:
-            row["action_label"] = tr(f"act_{row['action_key']}")
-            row["source_label"] = tr(f"src_{row['source_key']}")
+            self._translate_row(row)
         self.model.set_rows(self.all_data)
 
     def _retranslate_ui(self):
@@ -1325,52 +1514,31 @@ class MainWindow(QMainWindow):
 
     # ----- Data loading -----------------------------------------------------
     def load_data(self):
-        """Read all sources, normalise the records and refresh the views."""
-        data = []
+        """Load all sources in a bounded worker pool, keeping Qt responsive."""
+        if self._load_worker is not None:
+            return
+        self.refresh_btn.setEnabled(False)
+        self.status.showMessage(tr("status_loading"))
+        worker = _LoadWorker(self.log_path)
+        worker.signals.completed.connect(self._load_completed)
+        worker.signals.failed.connect(self._load_failed)
+        self._load_worker = worker
+        self._worker_pool.start(worker, 1)
 
-        # Pacman + AUR (AUR is inferred from the set of foreign packages)
-        foreign = get_foreign_packages()
-        try:
-            with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
-                # Stream line by line instead of slurping the whole log into
-                # memory — pacman.log can grow to many MB over a system's life.
-                for line in f:
-                    m = ACTION_PATTERN.search(line)
-                    if not m:
-                        continue
-                    action = m.group("action")
-                    pkg = m.group("pkg")
-                    old, new = split_version(action, m.group("ver"))
-                    source_key = "aur" if pkg in foreign else "pacman"
-                    data.append({
-                        "dt": parse_timestamp(m.group("ts")),
-                        "action_key": action,
-                        "pkg": pkg,
-                        "old": old,
-                        "new": new,
-                        "source_key": source_key,
-                    })
-        except FileNotFoundError:
-            self.status.showMessage(tr("file_not_found").format(path=self.log_path))
-        except PermissionError:
-            QMessageBox.warning(self, tr("perm_denied"),
-                                tr("cannot_read").format(path=self.log_path))
+    def _load_completed(self, result):
+        self._load_worker = None
+        self.refresh_btn.setEnabled(True)
+        data = result["rows"]
 
-        # Flatpak: real history from system + user installations, plus a
-        # guaranteed "installed" row for every app that has no history entry.
-        flatpak_available = bool(shutil.which("flatpak"))
-        flatpak_rows = read_flatpak_all()
-        data.extend(flatpak_rows)
-
-        # Enrich each record with display fields, then sort newest first
+        # Enrich records only in the GUI thread: translated labels depend on
+        # the language that is active at the instant loading completes.
         for row in data:
             dt = row["dt"]
             row["sort_ts"] = dt.timestamp() if dt else 0.0
             row["display"] = dt.strftime("%Y-%m-%d  %H:%M") if dt else "—"
-            row["action_label"] = tr(f"act_{row['action_key']}")
             row["action_color"] = ACTIONS.get(row["action_key"], "#888888")
-            row["source_label"] = tr(f"src_{row['source_key']}")
             row["source_color"] = SOURCES.get(row["source_key"], "#888888")
+            self._translate_row(row)
         data.sort(key=lambda r: r["sort_ts"], reverse=True)
         self.all_data = data
         self.model.set_rows(data)
@@ -1378,9 +1546,59 @@ class MainWindow(QMainWindow):
         counts = Counter(r["source_key"] for r in data)
         self._entry_count = len(data)
         self._src_counts = dict(counts)
-        self._flatpak_available = flatpak_available
-        self._has_flatpak_rows = bool(flatpak_rows)
+        self._flatpak_available = result["flatpak_available"]
+        self._has_flatpak_rows = result["has_flatpak_rows"]
+        self._log_error = result["log_error"]
         self.apply_filters()
+
+        if self._log_error and self._log_error[0] == "permission":
+            QMessageBox.warning(
+                self, tr("perm_denied"),
+                tr("cannot_read").format(path=self._log_error[1]),
+            )
+
+    def _load_failed(self, error):
+        self._load_worker = None
+        self.refresh_btn.setEnabled(True)
+        self.status.showMessage(tr("load_failed").format(error=error))
+
+    # ----- Asynchronous package details ------------------------------------
+    def _queue_tooltip(self, key, rec):
+        if key in self._tooltip_workers:
+            return
+        if len(self._tooltip_workers) >= _TOOLTIP_QUEUE_LIMIT:
+            self.model.tooltip_finished(key)
+            return
+        worker = _TooltipWorker(key, rec, key[2])
+        worker.signals.completed.connect(self._tooltip_completed)
+        worker.signals.failed.connect(self._tooltip_failed)
+        self._tooltip_workers[key] = worker
+        self._worker_pool.start(worker)
+
+    def _tooltip_completed(self, key, html):
+        self._tooltip_workers.pop(key, None)
+        self.model.tooltip_finished(key)
+        _tooltip_cache_put(key, html)
+
+        # Replace the temporary "Loading …" tooltip if the pointer still
+        # rests on the same package when the worker finishes.
+        if not self.model.tooltips_enabled:
+            return
+        global_pos = QCursor.pos()
+        view_pos = self.table.viewport().mapFromGlobal(global_pos)
+        proxy_index = self.table.indexAt(view_pos)
+        if not proxy_index.isValid():
+            return
+        source_index = self.proxy.mapToSource(proxy_index)
+        if not source_index.isValid():
+            return
+        rec = self.model.rows[source_index.row()]
+        if _tooltip_key(rec) == key:
+            QToolTip.showText(global_pos, html, self.table.viewport())
+
+    def _tooltip_failed(self, key):
+        self._tooltip_workers.pop(key, None)
+        self.model.tooltip_finished(key)
 
     def _build_base_status(self):
         counts = self._src_counts
@@ -1392,6 +1610,12 @@ class MainWindow(QMainWindow):
             s += f"   {tr('flatpak_missing')}"
         elif not self._has_flatpak_rows:
             s += f"   {tr('flatpak_empty')}"
+        if self._log_error:
+            error_key, path = self._log_error
+            if error_key == "file_not_found":
+                s += f"   {tr('file_not_found').format(path=path)}"
+            else:
+                s += f"   {tr('cannot_read').format(path=path)}"
         return s
 
     def apply_filters(self):
