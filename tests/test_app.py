@@ -1,6 +1,10 @@
 import importlib.util
+from datetime import datetime
+import locale
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -123,6 +127,134 @@ class DataAndPerformanceTests(unittest.TestCase):
         }
         self.assertTrue(proxy.accepts(rec))
 
+    def test_filter_matches_multi_tokens_versions_and_dates(self):
+        proxy = APP.UpdateFilterProxy()
+        rec = {
+            "pkg": "linux-cachyos",
+            "source_label": "Pacman",
+            "action_label": "Upgraded",
+            "source_key": "pacman",
+            "action_key": "upgraded",
+            "old": "6.11.0-1",
+            "new": "6.12.0-1",
+            "display": "2026-09-17  22:02",
+        }
+        APP.MainWindow._translate_row(rec)
+
+        # Multi-word out of order
+        proxy.set_filters("6.12 linux", None, None)
+        self.assertTrue(proxy.accepts(rec))
+
+        # Search by date
+        proxy.set_filters("2026-09-17", None, None)
+        self.assertTrue(proxy.accepts(rec))
+
+        # Search by old version
+        proxy.set_filters("6.11.0", None, None)
+        self.assertTrue(proxy.accepts(rec))
+
+        # Search mismatch
+        proxy.set_filters("firefox", None, None)
+        self.assertFalse(proxy.accepts(rec))
+
+    def test_parse_timestamp_iso_and_legacy(self):
+        # Modern ISO-8601 pacman format
+        dt_iso = APP.parse_timestamp("2026-09-17T22:02:59+0200")
+        self.assertIsNotNone(dt_iso)
+        self.assertEqual(dt_iso.year, 2026)
+        self.assertEqual(dt_iso.month, 9)
+        self.assertEqual(dt_iso.day, 17)
+
+        # Legacy pacman format
+        dt_legacy = APP.parse_timestamp("2023-01-02 09:15")
+        self.assertIsNotNone(dt_legacy)
+        self.assertEqual(dt_legacy.year, 2023)
+        self.assertEqual(dt_legacy.minute, 15)
+
+        # Flatpak format
+        dt_fp = APP.parse_timestamp("Jun 20 10:57:01")
+        self.assertIsNotNone(dt_fp)
+        self.assertEqual(dt_fp.month, 6)
+        self.assertEqual(dt_fp.day, 20)
+
+        # Invalid
+        self.assertIsNone(APP.parse_timestamp("not-a-timestamp"))
+
+    def test_collect_update_data_fast_skips_non_alpm(self):
+        log = (
+            "[2026-09-17T22:02:48+0200] [PACMAN] Running 'pacman -Syu'\n"
+            "[2026-09-17T22:02:58+0200] [ALPM-SCRIPTLET] ==> hook\n"
+            "[2026-09-17T22:02:59+0200] [ALPM] upgraded mypkg (1.0 -> 2.0)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "pacman.log"
+            path.write_text(log, encoding="utf-8")
+            with (
+                mock.patch.object(APP, "get_foreign_packages", return_value=set()),
+                mock.patch.object(APP, "_command_path", return_value=None),
+            ):
+                result = APP.collect_update_data(str(path))
+
+        self.assertEqual(len(result["rows"]), 1)
+        self.assertEqual(result["rows"][0]["pkg"], "mypkg")
+        self.assertEqual(result["rows"][0]["old"], "1.0")
+        self.assertEqual(result["rows"][0]["new"], "2.0")
+
+    def test_parse_timestamp_yearless_ignores_process_locale(self):
+        # QApplication switches LC_TIME to the user's locale; "Mar"/"Oct"
+        # must still parse on e.g. German systems.
+        original = locale.setlocale(locale.LC_TIME)
+        for name in ("de_DE.UTF-8", "de_DE.utf8"):
+            try:
+                locale.setlocale(locale.LC_TIME, name)
+                break
+            except locale.Error:
+                continue
+        else:
+            self.skipTest("German locale not available")
+        try:
+            for raw, month in (("Mar  3 10:57:01", 3), ("Oct 20 09:00", 10),
+                               ("Dec 31 23:59:59", 12)):
+                with self.subTest(raw=raw):
+                    dt = APP.parse_timestamp(raw)
+                    self.assertIsNotNone(dt)
+                    self.assertEqual(dt.month, month)
+        finally:
+            locale.setlocale(locale.LC_TIME, original)
+
+    def test_parse_timestamp_yearless_year_rollover_and_leap_day(self):
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2025, 3, 10, 12, 0)
+
+        with mock.patch.object(APP, "datetime", FixedDateTime):
+            # Feb 29 does not exist in 2025 -> previous (leap) year
+            self.assertEqual(APP.parse_timestamp("Feb 29 08:00:00"),
+                             datetime(2024, 2, 29, 8, 0))
+            # A date after "now" belongs to the previous year
+            self.assertEqual(APP.parse_timestamp("Dec 24 18:30"),
+                             datetime(2024, 12, 24, 18, 30))
+            self.assertEqual(APP.parse_timestamp("Mar  1 07:05:09"),
+                             datetime(2025, 3, 1, 7, 5, 9))
+            self.assertIsNone(APP.parse_timestamp("Foo 01 10:00"))
+            self.assertIsNone(APP.parse_timestamp("Feb 30 10:00"))
+
+    def test_cli_version_and_help(self):
+        script = str(PROJECT_ROOT / "cachy-update-history.py")
+        res_v = subprocess.run(
+            [sys.executable, script, "--version"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(res_v.returncode, 0)
+        self.assertIn(APP.__version__, res_v.stdout)
+
+        res_h = subprocess.run(
+            [sys.executable, script, "--help"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(res_h.returncode, 0)
+        self.assertIn("Usage:", res_h.stdout)
 
 if __name__ == "__main__":
     unittest.main()

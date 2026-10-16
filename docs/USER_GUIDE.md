@@ -74,10 +74,11 @@ entries.
 
 ### Search and filters
 
-The text field matches the package name and the translated source and action
-labels. Text, source and action filters combine with logical AND. Typing is
-debounced briefly so statistics and the chart are not recalculated for every
-keystroke.
+The text field matches the package name, old and new versions, date/time, and
+the translated source and action labels. Multiple space-separated terms combine
+with logical AND regardless of term order (e.g. `linux 6.12` or `cachyos 2026-09`).
+Text, source and action filters combine together. Typing is debounced briefly
+so statistics and the chart are not recalculated for every keystroke.
 
 The source choices are Pacman, AUR and Flatpak. Action choices are upgraded,
 installed, removed, reinstalled and downgraded. A source can legitimately have
@@ -91,7 +92,7 @@ text. The default order is newest first.
 
 ### Inspect package details
 
-Hover a table row to request current package metadata:
+Hover a table row to request current package metadata in a compact tooltip:
 
 - Pacman and AUR rows use `pacman -Qi`;
 - Flatpak rows use `flatpak info`.
@@ -101,15 +102,36 @@ the GUI thread and cached. If a historical package is no longer installed, the
 tooltip keeps the log's version information and explains that live metadata is
 unavailable.
 
-The **Details** button disables both table and chart tooltips. Its state is
-remembered across restarts.
+Double-clicking a row or pressing `Enter` opens a dedicated **Package Details**
+dialog containing full descriptions, licenses, sizes, install dates, clickable
+project URLs, and buttons to copy the package name or all details.
+
+The **Details** toolbar toggle disables hover tooltips on both table and chart.
+Its state is remembered across restarts.
 
 ### Read the activity chart
 
-The chart counts visible records per calendar day and therefore follows all
-active filters. It shows the 30 most recent days that contain activity, not the
-30 most recent consecutive calendar days. Hover a bar for its date and exact
-count.
+The chart counts visible records per calendar day and follows all active
+filters. It shows the 30 most recent days that contain activity. Hovering a bar
+shows its date and exact count; clicking a bar filters the timeline to that
+specific day (clicking it again clears the filter).
+
+### Shortcuts and context menu
+
+Right-clicking any table row opens a context menu with options to:
+
+- Copy the package name or version;
+- Copy the entire row (tab-separated);
+- Filter by the selected package;
+- Open the package details dialog.
+
+Standard keyboard shortcuts:
+
+- `Ctrl+F` or `/`: focus the search field and select its text;
+- `Ctrl+C` (while the table has focus): copy the selected package name(s);
+- `F5` or `Ctrl+R`: reload package history from disk;
+- `Ctrl+S` or `Ctrl+E`: export the current view to CSV;
+- `Escape`: clear the search field or table selection.
 
 ### Reload and switch language
 

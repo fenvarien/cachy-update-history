@@ -90,17 +90,20 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableView, QHeaderView, QPushButton, QLineEdit, QComboBox,
     QLabel, QStyledItemDelegate, QStyle, QFileDialog, QMessageBox,
-    QAbstractItemView, QToolTip,
+    QAbstractItemView, QToolTip, QDialog, QFormLayout, QScrollArea,
+    QFrame, QMenu,
 )
 from PyQt6.QtGui import (
     QColor, QPainter, QFont, QIcon, QPalette, QLinearGradient, QPainterPath,
-    QCursor,
+    QCursor, QKeySequence, QShortcut,
 )
 from PyQt6.QtCore import (
     Qt, QRectF, QSize, QTimer, QAbstractTableModel, QModelIndex,
     QSortFilterProxyModel, QObject, QRunnable, QThreadPool, pyqtSignal,
+    QEvent,
 )
 
+__version__ = "1.2.0"
 LOG_PATH = "/var/log/pacman.log"
 ACCENT = "#3DAEE9"
 
@@ -211,6 +214,19 @@ _T = {
         "tt_runtime":      "Runtime",
         "tt_loading":      "Loading package details …",
         "tt_not_installed": "Not currently installed — showing log data only.",
+        "ctx_copy_pkg":    "Copy package name",
+        "ctx_copy_ver":    "Copy version",
+        "ctx_copy_row":    "Copy row",
+        "ctx_filter_pkg":  "Filter by this package",
+        "ctx_details":     "Package details …",
+        "details_title":    "Package details",
+        "details_copy_all": "Copy all details",
+        "details_close":    "Close",
+        "chart_hint":       "Click to filter by this day",
+        "copied":           "Copied „{text}“ to clipboard",
+        "copied_row":       "Copied row to clipboard",
+        "copied_rows":      "Copied {n} packages to clipboard",
+        "search_hint":      "Filter packages, versions or dates (Ctrl+F) …",
     },
     "de": {
         "window_title":    "CachyOS Update-Verlauf",
@@ -263,6 +279,19 @@ _T = {
         "tt_runtime":      "Runtime",
         "tt_loading":      "Paketdetails werden geladen …",
         "tt_not_installed": "Derzeit nicht installiert — es werden nur Log-Daten angezeigt.",
+        "ctx_copy_pkg":    "Paketname kopieren",
+        "ctx_copy_ver":    "Version kopieren",
+        "ctx_copy_row":    "Zeile kopieren",
+        "ctx_filter_pkg":  "Nach diesem Paket filtern",
+        "ctx_details":     "Paketdetails …",
+        "details_title":    "Paketdetails",
+        "details_copy_all": "Alle Details kopieren",
+        "details_close":    "Schließen",
+        "chart_hint":       "Klicken zum Filtern nach diesem Tag",
+        "copied":           "„{text}“ in Zwischenablage kopiert",
+        "copied_row":       "Zeile in Zwischenablage kopiert",
+        "copied_rows":      "{n} Pakete in Zwischenablage kopiert",
+        "search_hint":      "Pakete, Versionen oder Daten filtern (Strg+F) …",
     },
 }
 
@@ -304,6 +333,16 @@ ACTION_PATTERN = re.compile(
 FLATPAK_APP_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
+# Yearless "Mon DD HH:MM[:SS]" timestamps from `flatpak history`.
+_YEARLESS_TS_PATTERN = re.compile(
+    r"(?P<mon>[A-Za-z]{3}) +(?P<day>\d{1,2}) +"
+    r"(?P<h>\d{1,2}):(?P<m>\d{2})(?::(?P<s>\d{2}))?\Z"
+)
+_MONTHS = {name: i for i, name in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun",
+     "jul", "aug", "sep", "oct", "nov", "dec"), start=1)}
+
+
 def _valid_flatpak_app_id(appid):
     return (isinstance(appid, str) and "." in appid
             and FLATPAK_APP_ID_PATTERN.fullmatch(appid) is not None)
@@ -322,27 +361,39 @@ def parse_timestamp(raw):
     formats produced by `flatpak history`. Returns None if nothing matches.
     """
     raw = raw.strip()
+    # Fast path: ISO-8601 timestamps used by modern pacman logs (C-level
+    # parser; Python 3.10 rejects the "+0200" offset and uses strptime below).
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S",
                 "%Y-%m-%d %H:%M", "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M"):
         try:
             return datetime.strptime(raw, fmt)
         except ValueError:
             continue
-    # flatpak history emits "Jun 20 10:57:01" (LC_ALL=C, no year).
-    # Collapse repeated spaces ("Jun  3 …" for single-digit days), then try
-    # month-name formats and attach the current year, rolling back one year if
-    # the resulting datetime would be in the future.
-    normalized = re.sub(r' +', ' ', raw)
-    for fmt in ("%b %d %H:%M:%S", "%b %d %H:%M"):
+    # flatpak history emits "Jun 20 10:57:01" (LC_ALL=C, no year). Month names
+    # are matched against a fixed English table instead of strptime's %b,
+    # which follows LC_TIME — and QApplication switches that to the user's
+    # locale, so e.g. "Mar"/"Oct" would fail on German systems. The year is
+    # the current one, or the previous one if the date would lie in the future
+    # or does not exist this year (Feb 29).
+    m = _YEARLESS_TS_PATTERN.match(raw)
+    if m is None:
+        return None
+    month = _MONTHS.get(m.group("mon").casefold())
+    if month is None:
+        return None
+    now = datetime.now()
+    for year in (now.year, now.year - 1):
         try:
-            dt = datetime.strptime(normalized, fmt)
-            now = datetime.now()
-            dt = dt.replace(year=now.year)
-            if dt > now:
-                dt = dt.replace(year=now.year - 1)
-            return dt
+            dt = datetime(year, month, int(m.group("day")), int(m.group("h")),
+                          int(m.group("m")), int(m.group("s") or 0))
         except ValueError:
             continue
+        if dt <= now:
+            return dt
     return None
 
 
@@ -428,13 +479,15 @@ def _flatpak_deploy_mtime(appid):
     newest = 0.0
     for base in FLATPAK_BASE_DIRS:
         appdir = os.path.join(base, "app", appid)
+        if not os.path.isdir(appdir):
+            continue
         # Layout: <base>/app/<id>/<arch>/<branch>/active
         for active in glob.glob(os.path.join(appdir, "*", "*", "active")):
             try:
                 newest = max(newest, os.lstat(active).st_mtime)
             except OSError:
                 pass
-        if newest == 0.0 and os.path.isdir(appdir):
+        if newest == 0.0:
             try:
                 newest = max(newest, os.stat(appdir).st_mtime)
             except OSError:
@@ -579,6 +632,8 @@ def collect_update_data(log_path):
     try:
         with open(log_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
+                if "[ALPM] " not in line:
+                    continue
                 m = ACTION_PATTERN.search(line)
                 if not m:
                     continue
@@ -680,7 +735,13 @@ def apply_theme(app):
 
     _UI.update(accent=c["accent"], muted=c["muted"], base=c["base"])
 
-    app.setStyleSheet(_STYLESHEET.format(**c))
+    # Re-applying an identical sheet would needlessly repolish every widget
+    # (and can re-trigger palette change events). Return whether it changed.
+    sheet = _STYLESHEET.format(**c)
+    if sheet == app.styleSheet():
+        return False
+    app.setStyleSheet(sheet)
+    return True
 
 
 _STYLESHEET = """
@@ -766,7 +827,25 @@ QToolTip {{
     border-radius:8px; padding:8px 10px;
 }}
 
-QStatusBar {{ color:{muted}; }}
+QMenu {{
+    background:{field}; border:1px solid {border}; border-radius:8px;
+    padding:4px; color:{text};
+}}
+QMenu::item {{
+    padding:6px 20px; border-radius:4px;
+}}
+QMenu::item:selected {{
+    background:{accent}; color:{hltext};
+}}
+QMenu::separator {{
+    height:1px; background:{border}; margin:4px 8px;
+}}
+
+QDialog {{
+    background:{bg}; color:{text};
+}}
+
+QStatusBar, QStatusBar QLabel {{ color:{muted}; }}
 QStatusBar::item {{ border:none; }}
 """
 
@@ -966,6 +1045,27 @@ class _LoadWorker(QRunnable):
             self.signals.failed.emit(str(exc))
 
 
+class _DetailsSignals(QObject):
+    completed = pyqtSignal(object)
+
+
+class _DetailsWorker(QRunnable):
+    """Query the detail rows for the package dialog outside the GUI thread."""
+
+    def __init__(self, rec, lang):
+        super().__init__()
+        self.rec = dict(rec)
+        self.lang = lang
+        self.signals = _DetailsSignals()
+
+    def run(self):
+        try:
+            fields = _pkg_fields(self.rec, self.lang)
+        except Exception:
+            fields = None
+        self.signals.completed.emit(fields)
+
+
 class _TooltipSignals(QObject):
     completed = pyqtSignal(object, str)
     failed = pyqtSignal(object)
@@ -1015,6 +1115,7 @@ class UpdateTableModel(QAbstractTableModel):
     def set_rows(self, rows):
         self.beginResetModel()
         self.rows = rows
+        self._pending_tooltips.clear()
         self.endResetModel()
 
     def rowCount(self, parent=QModelIndex()):
@@ -1063,6 +1164,13 @@ class UpdateTableModel(QAbstractTableModel):
         self._pending_tooltips.discard(key)
 
 
+def _search_text(rec):
+    """Case-folded haystack for the text filter: name, labels, versions, date."""
+    parts = (rec["pkg"], rec["source_label"], rec["action_label"],
+             rec.get("old"), rec.get("new"), rec.get("display"))
+    return " ".join(p for p in parts if p and p != "—").casefold()
+
+
 class UpdateFilterProxy(QSortFilterProxyModel):
     """Sort + filter proxy.
 
@@ -1074,11 +1182,13 @@ class UpdateFilterProxy(QSortFilterProxyModel):
         super().__init__()
         self.setSortRole(SORT_ROLE)
         self._text = ""
+        self._terms = []
         self._source_key = None
         self._action_key = None
 
     def set_filters(self, text, source_key, action_key):
         self._text = text.casefold().strip()
+        self._terms = self._text.split()
         self._source_key = source_key
         self._action_key = action_key
         self.invalidateFilter()
@@ -1088,13 +1198,11 @@ class UpdateFilterProxy(QSortFilterProxyModel):
             return False
         if self._action_key and rec["action_key"] != self._action_key:
             return False
-        if self._text:
+        if self._terms:
             hay = rec.get("search_text")
             if hay is None:
-                hay = (f"{rec['pkg']} {rec['source_label']} "
-                       f"{rec['action_label']}").casefold()
-            if self._text not in hay:
-                return False
+                hay = _search_text(rec)
+            return all(term in hay for term in self._terms)
         return True
 
     def filterAcceptsRow(self, source_row, source_parent):
@@ -1140,12 +1248,136 @@ class BadgeDelegate(QStyledItemDelegate):
         return QSize(s.width() + 28, max(s.height(), 34))
 
 
+class PackageDetailsDialog(QDialog):
+    """Detailed view for a single package with clickable links and copy buttons."""
+
+    def __init__(self, rec, fields, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.rec = rec
+        self.fields = [(label, value.strip()) for label, value in fields or []
+                       if value and value.strip() and value.strip() != "None"]
+        self.setWindowTitle(f"{rec['pkg']} — {tr('details_title')}")
+        self.resize(520, 420)
+        self.setMinimumSize(420, 320)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 16)
+        layout.setSpacing(12)
+
+        # Header section
+        header_box = QVBoxLayout()
+        header_box.setSpacing(4)
+
+        pkg_title = QLabel(rec["pkg"])
+        pkg_title.setTextFormat(Qt.TextFormat.PlainText)
+        pkg_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        f = QFont(self.font())
+        f.setPointSizeF(f.pointSizeF() + 4)
+        f.setBold(True)
+        pkg_title.setFont(f)
+        pkg_title.setStyleSheet(f"color: {_UI['accent']};")
+        header_box.addWidget(pkg_title)
+
+        meta_line = QLabel(
+            f"<span style='color:{rec['source_color']};'>●</span>&nbsp;<b>{_esc(rec['source_label'])}</b>"
+            f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+            f"<span style='color:{rec['action_color']};'><b>{_esc(rec['action_label'])}</b></span>"
+            f"&nbsp;&nbsp;·&nbsp;&nbsp;{_esc(rec['display'])}"
+        )
+        meta_line.setTextFormat(Qt.TextFormat.RichText)
+        header_box.addWidget(meta_line)
+
+        change = _version_change(rec)
+        if change:
+            change_label = QLabel(f"<b>{_esc(tr('tt_change'))}:</b> {change}")
+            change_label.setTextFormat(Qt.TextFormat.RichText)
+            header_box.addWidget(change_label)
+
+        layout.addLayout(header_box)
+
+        # Separator line
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep)
+
+        # Detail fields inside a scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_content = QWidget()
+        form = QFormLayout(scroll_content)
+        form.setContentsMargins(4, 4, 4, 4)
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+
+        if not self.fields:
+            not_inst = QLabel(tr("tt_not_installed"))
+            not_inst.setStyleSheet(f"color: {_UI['muted']}; font-style: italic;")
+            form.addRow(not_inst)
+        else:
+            for label, value in self.fields:
+                lbl = QLabel(f"<span style='color:{_UI['muted']};'>{_esc(label)}:</span>")
+                lbl.setTextFormat(Qt.TextFormat.RichText)
+
+                if value.startswith(("http://", "https://")):
+                    val = QLabel(f"<a href='{_esc(value)}' style='color:{_UI['accent']};'>{_esc(value)}</a>")
+                    val.setTextFormat(Qt.TextFormat.RichText)
+                    val.setOpenExternalLinks(True)
+                else:
+                    # Plain text: values come from package metadata and must be
+                    # shown verbatim (no HTML interpretation, no visible &amp;).
+                    val = QLabel(value)
+                    val.setTextFormat(Qt.TextFormat.PlainText)
+                    val.setWordWrap(True)
+                    val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                form.addRow(lbl, val)
+
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, 1)
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+        btn_copy_pkg = QPushButton(tr("ctx_copy_pkg"))
+        btn_copy_pkg.setIcon(QIcon.fromTheme("edit-copy"))
+        btn_copy_pkg.clicked.connect(self._copy_pkg)
+        btn_layout.addWidget(btn_copy_pkg)
+
+        btn_copy_all = QPushButton(tr("details_copy_all"))
+        btn_copy_all.clicked.connect(self._copy_all)
+        btn_layout.addWidget(btn_copy_all)
+
+        btn_layout.addStretch(1)
+
+        btn_close = QPushButton(tr("details_close"))
+        btn_close.setObjectName("primary")
+        btn_close.setDefault(True)
+        btn_close.clicked.connect(self.accept)
+        btn_layout.addWidget(btn_close)
+
+        layout.addLayout(btn_layout)
+
+    def _copy_pkg(self):
+        QApplication.clipboard().setText(self.rec["pkg"])
+
+    def _copy_all(self):
+        # Same labels and order as the table columns, then the live metadata.
+        lines = [f"{label}: {self.rec[key]}"
+                 for label, key in zip(tr("headers"), UpdateTableModel._COLS,
+                                      strict=True)]
+        lines += [f"{label}: {value}" for label, value in self.fields]
+        QApplication.clipboard().setText("\n".join(lines))
+
+
 class ActivityChart(QWidget):
     """A simple bar chart of packages-per-day, drawn with QPainter.
 
     Kept deliberately dependency-free (no matplotlib / QtCharts) so the only
     requirement remains PyQt6.
     """
+    bar_clicked = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.data = []  # list of (iso_date, count)
@@ -1158,6 +1390,7 @@ class ActivityChart(QWidget):
     def set_data(self, data):
         self.data = data
         self._hover = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
 
     # ----- Hover interaction ------------------------------------------------
@@ -1175,17 +1408,27 @@ class ActivityChart(QWidget):
         idx = self._bar_at(event.position())
         if idx != self._hover:
             self._hover = idx
+            self.setCursor(Qt.CursorShape.PointingHandCursor if idx is not None else Qt.CursorShape.ArrowCursor)
             self.update()
         if idx is not None and self.tooltips_enabled:
             day, count = self.data[idx]
+            hint = f"<br><span style='font-size:9px;color:{_UI['muted']};'>{_esc(tr('chart_hint'))}</span>"
             QToolTip.showText(event.globalPosition().toPoint(),
-                              f"<b>{_esc(day)}</b><br>{count} ×", self)
+                              f"<b>{_esc(day)}</b><br>{count} &times;{hint}", self)
         else:
             QToolTip.hideText()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            idx = self._bar_at(event.position())
+            if idx is not None:
+                self.bar_clicked.emit(self.data[idx][0])
+        super().mousePressEvent(event)
 
     def leaveEvent(self, event):
         if self._hover is not None:
             self._hover = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             self.update()
         QToolTip.hideText()
 
@@ -1325,6 +1568,7 @@ class MainWindow(QMainWindow):
         self._has_flatpak_rows = False
         self._log_error = None
         self._load_worker = None
+        self._details_worker = None
         self._tooltip_workers = {}
         self._worker_pool = QThreadPool(self)
         self._worker_pool.setMaxThreadCount(3)
@@ -1450,8 +1694,160 @@ class MainWindow(QMainWindow):
             self.table.setColumnWidth(col, width)
         root.addWidget(self.table, 1)
 
+        # Shortcuts. Keys are listed explicitly: combining StandardKey.Refresh
+        # (already F5 on Linux) with an extra "F5" shortcut would make F5
+        # ambiguous so that neither fires.
+        for keys, slot in ((("Ctrl+F", "/"), self._focus_search),
+                           (("Escape",), self._on_escape),
+                           (("F5", "Ctrl+R"), self.load_data),
+                           (("Ctrl+S", "Ctrl+E"), self.export_csv)):
+            shortcut = QShortcut(self)
+            shortcut.setKeys([QKeySequence(k) for k in keys])
+            shortcut.activated.connect(slot)
+        # Copy only while the table has focus, so Ctrl+C elsewhere keeps its
+        # normal meaning.
+        copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self.table,
+                                  self._copy_selection)
+        copy_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+
+        # Interactions
+        self.search_input.setToolTip(tr("search_hint"))
+        self.chart.bar_clicked.connect(self._on_chart_bar_clicked)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_context_menu)
+        self.table.doubleClicked.connect(self._on_row_double_clicked)
+        self.table.installEventFilter(self)
+
+        # Permanent summary in a status bar widget; transient messages
+        # (loading, copied, exported) temporarily cover it and then reveal it
+        # again instead of erasing it.
         self.status = self.statusBar()
+        self.status_label = QLabel()
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.status.addWidget(self.status_label, 1)
         self.load_data()
+
+    # ----- Keyboard & Mouse interactions -----------------------------------
+    def _rec_at(self, proxy_index):
+        """Return the record behind a (proxy) table index, or None."""
+        if not proxy_index.isValid():
+            return None
+        source_index = self.proxy.mapToSource(proxy_index)
+        if not source_index.isValid():
+            return None
+        return self.model.rows[source_index.row()]
+
+    def _focus_search(self):
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
+    def _on_escape(self):
+        if self.search_input.hasFocus() or self.search_input.text():
+            self.search_input.clear()
+            self.table.setFocus()
+        else:
+            self.table.clearSelection()
+
+    def _copy_text(self, text, message=None):
+        QApplication.clipboard().setText(text)
+        self.status.showMessage(message or tr("copied").format(text=text), 3500)
+
+    def _copy_selection(self):
+        indexes = sorted(self.table.selectionModel().selectedRows(),
+                         key=lambda i: i.row())
+        names = [rec["pkg"] for rec in map(self._rec_at, indexes) if rec]
+        if len(names) == 1:
+            self._copy_text(names[0])
+        elif names:
+            self._copy_text("\n".join(names),
+                            tr("copied_rows").format(n=len(names)))
+
+    def _show_context_menu(self, pos):
+        rec = self._rec_at(self.table.indexAt(pos))
+        if rec is None:
+            return
+
+        menu = QMenu(self)
+
+        act_copy_pkg = menu.addAction(tr("ctx_copy_pkg"))
+        act_copy_pkg.setIcon(QIcon.fromTheme("edit-copy"))
+        act_copy_pkg.triggered.connect(lambda: self._copy_text(rec["pkg"]))
+
+        ver = rec["new"] if rec["new"] != "—" else rec["old"]
+        if ver and ver != "—":
+            act_copy_ver = menu.addAction(tr("ctx_copy_ver"))
+            act_copy_ver.triggered.connect(lambda: self._copy_text(ver))
+
+        act_copy_row = menu.addAction(tr("ctx_copy_row"))
+        row_str = (
+            f"{rec['display']}\t{rec['source_label']}\t"
+            f"{rec['action_label']}\t{rec['pkg']}\t{rec['old']}\t{rec['new']}"
+        )
+        act_copy_row.triggered.connect(
+            lambda: self._copy_text(row_str, tr("copied_row")))
+
+        menu.addSeparator()
+
+        act_filter = menu.addAction(tr("ctx_filter_pkg"))
+        act_filter.setIcon(QIcon.fromTheme("edit-find"))
+        act_filter.triggered.connect(lambda: self.search_input.setText(rec["pkg"]))
+
+        act_details = menu.addAction(tr("ctx_details"))
+        act_details.setIcon(QIcon.fromTheme("dialog-information"))
+        act_details.triggered.connect(lambda: self.show_package_details(rec))
+
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+        menu.deleteLater()  # parented to the window; free it once closed
+
+    def _on_row_double_clicked(self, proxy_index):
+        rec = self._rec_at(proxy_index)
+        if rec is not None:
+            self.show_package_details(rec)
+
+    def show_package_details(self, rec):
+        """Query details in a worker, then open the dialog (non-blocking)."""
+        if self._details_worker is not None:
+            return
+        self.status.showMessage(tr("tt_loading"))
+        worker = _DetailsWorker(rec, _LANG)
+        worker.signals.completed.connect(
+            lambda fields: self._details_completed(rec, fields))
+        self._details_worker = worker
+        self._worker_pool.start(worker, 1)
+
+    def _details_completed(self, rec, fields):
+        self._details_worker = None
+        self.status.clearMessage()
+        dlg = PackageDetailsDialog(rec, fields, self)
+        dlg.open()
+
+    def _on_chart_bar_clicked(self, day):
+        if self.search_input.text().strip() == day:
+            self.search_input.clear()
+        else:
+            self.search_input.setText(day)
+
+    def eventFilter(self, source, event):
+        if source == self.table and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                idx = self.table.currentIndex()
+                if idx.isValid():
+                    self._on_row_double_clicked(idx)
+                    return True
+        return super().eventFilter(source, event)
+
+    def changeEvent(self, event):
+        # Follow live system theme / accent changes. In Qt 6 a new application
+        # palette reaches the window as PaletteChange; apply_theme() is a no-op
+        # when the derived stylesheet is unchanged, which also prevents a
+        # feedback loop from the repolish triggered by setStyleSheet().
+        if (event.type() in (QEvent.Type.ApplicationPaletteChange,
+                             QEvent.Type.PaletteChange)
+                and apply_theme(QApplication.instance())):
+            _TOOLTIP_CACHE.clear()      # cached tooltip HTML embeds old colors
+            self.apply_filters()        # stats line embeds the accent color
+            self.chart.update()
+        super().changeEvent(event)
 
     # ----- Toggles ----------------------------------------------------------
     def toggle_tooltips(self, enabled):
@@ -1476,9 +1872,7 @@ class MainWindow(QMainWindow):
     def _translate_row(row):
         row["action_label"] = tr(f"act_{row['action_key']}")
         row["source_label"] = tr(f"src_{row['source_key']}")
-        row["search_text"] = (
-            f"{row['pkg']} {row['source_label']} {row['action_label']}"
-        ).casefold()
+        row["search_text"] = _search_text(row)
 
     def _retranslate_rows(self):
         """Update translated display labels in all loaded records."""
@@ -1492,6 +1886,7 @@ class MainWindow(QMainWindow):
         self.title_label.setText(tr("title_label"))
         self.subtitle_label.setText(tr("subtitle"))
         self.search_input.setPlaceholderText(tr("search_ph"))
+        self.search_input.setToolTip(tr("search_hint"))
         self.lang_btn.setText(_LANG_NAMES[_LANG])
         self.refresh_btn.setText(tr("reload"))
         self.export_btn.setText(tr("export_csv"))
@@ -1534,6 +1929,7 @@ class MainWindow(QMainWindow):
     def _load_completed(self, result):
         self._load_worker = None
         self.refresh_btn.setEnabled(True)
+        self.status.clearMessage()
         data = result["rows"]
 
         # Enrich records only in the GUI thread: translated labels depend on
@@ -1592,14 +1988,8 @@ class MainWindow(QMainWindow):
             return
         global_pos = QCursor.pos()
         view_pos = self.table.viewport().mapFromGlobal(global_pos)
-        proxy_index = self.table.indexAt(view_pos)
-        if not proxy_index.isValid():
-            return
-        source_index = self.proxy.mapToSource(proxy_index)
-        if not source_index.isValid():
-            return
-        rec = self.model.rows[source_index.row()]
-        if _tooltip_key(rec) == key:
+        rec = self._rec_at(self.table.indexAt(view_pos))
+        if rec is not None and _tooltip_key(rec) == key:
             QToolTip.showText(global_pos, html, self.table.viewport())
 
     def _tooltip_failed(self, key):
@@ -1639,7 +2029,7 @@ class MainWindow(QMainWindow):
         msg = self._build_base_status()
         if shown != total:
             msg += f"   —   {tr('status_show')} {shown} {tr('status_of')} {total}"
-        self.status.showMessage(msg)
+        self.status_label.setText(msg)
 
     def update_stats(self, data):
         total = len(data)
@@ -1701,13 +2091,27 @@ class MainWindow(QMainWindow):
                 writer = csv.writer(f)
                 writer.writerow(tr("headers"))
                 writer.writerows(rows)
-            self.status.showMessage(tr("exported").format(n=len(rows), path=path))
+            self.status.showMessage(
+                tr("exported").format(n=len(rows), path=path), 8000)
         except OSError as e:
             QMessageBox.warning(self, tr("export_fail"), str(e))
 
 
 def main():
     global _LANG, _TOOLTIPS_ENABLED
+    if "--version" in sys.argv or "-v" in sys.argv:
+        print(f"CachyOS Update History {__version__}")
+        sys.exit(0)
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(
+            f"CachyOS Update History {__version__}\n"
+            "Usage: cachy-update-history [OPTIONS]\n\n"
+            "Options:\n"
+            "  -h, --help     Show this help message and exit\n"
+            "  -v, --version  Show program version and exit"
+        )
+        sys.exit(0)
+
     config = _load_config()
     if config.get("lang") in _T:
         _LANG = config["lang"]
@@ -1716,6 +2120,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("CachyOS Update History")
+    app.setApplicationVersion(__version__)
     apply_theme(app)
     window = MainWindow()
     window.show()
