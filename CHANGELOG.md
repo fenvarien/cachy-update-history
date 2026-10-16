@@ -55,6 +55,9 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- On Wayland (and KDE on X11) the window now reports the
+  `cachy-update-history` desktop file, so task bars show the launcher's icon
+  instead of a generic one. The desktop entry must keep that file name.
 - Flatpak history dates from months whose abbreviation differs in the user's
   locale (e.g. "Mar", "May", "Oct", "Dec" on German systems) are no longer
   shown without a date; month names no longer depend on `LC_TIME`, which

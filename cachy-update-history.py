@@ -2121,6 +2121,9 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("CachyOS Update History")
     app.setApplicationVersion(__version__)
+    # Wayland app id / KDE desktop-file hint: lets the shell match the window
+    # to cachy-update-history.desktop and show its icon in task switchers.
+    app.setDesktopFileName("cachy-update-history")
     apply_theme(app)
     window = MainWindow()
     window.show()
