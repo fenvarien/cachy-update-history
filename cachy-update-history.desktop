@@ -1,11 +1,15 @@
 [Desktop Entry]
 Type=Application
 Name=Update History
+Name[de]=Update-Verlauf
 GenericName=Package Update History
+GenericName[de]=Paket-Update-Verlauf
 Comment=Show recent Pacman, AUR and Flatpak package updates
+Comment[de]=Kürzliche Paketänderungen von Pacman, AUR und Flatpak anzeigen
 # Adjust the path to wherever you copied the script (replace YOUR_USERNAME):
 Exec=python3 /home/YOUR_USERNAME/.local/bin/cachy-update-history.py
 Icon=system-software-update
 Terminal=false
 Categories=System;
 Keywords=pacman;aur;flatpak;updates;history;cachyos;arch;
+Keywords[de]=pacman;aur;flatpak;updates;verlauf;cachyos;arch;pakete;

@@ -23,9 +23,12 @@ preventing the rest of the app from loading.
 ## Highlights
 
 - Pacman, AUR and Flatpak changes in one model/view-based table.
-- Combined text, source and action filters with chronological sorting.
-- Per-day activity chart that follows the active filter.
-- Package details loaded on demand without blocking the interface.
+- Multi-token search matching packages, versions, dates, sources and actions in any order.
+- Interactive per-day activity chart; click any bar to filter the view by that day.
+- On-demand package details via hover tooltips or full dialog with clickable website links.
+- Context menu and keyboard shortcuts (Ctrl+F, Ctrl+C, F5, Ctrl+S, Escape).
+- High-performance streamed log parsing with C-level ISO-8601 parsing and ALPM pre-filtering.
+- Dynamic system palette and dark/light mode integration without application restart.
 - CSV export of the current filtered and sorted view.
 - English and German UI with native light/dark palette integration.
 - No root privileges, network service or background daemon required.

@@ -9,6 +9,19 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Multi-token and multi-field search allowing users to filter by package,
+  versions (old and new), date/time, source, and action in any term order.
+- Interactive activity chart enabling users to click any date bar to instantly
+  filter the table by that specific day.
+- Dedicated Package Details dialog with clickable project URLs, full metadata,
+  and quick clipboard copy actions accessible via double-click, Enter, or the
+  context menu.
+- Table context menu and keyboard shortcuts: Ctrl+F / / (focus search), Ctrl+C
+  in the table (copy selected package names), F5 / Ctrl+R (reload),
+  Ctrl+S / Ctrl+E (export CSV), and Escape (clear search or selection).
+- Command-line flags `--version` (`-v`) and `--help` (`-h`).
+- Freedesktop application launcher German localization (`Name[de]`,
+  `GenericName[de]`, `Comment[de]`, `Keywords[de]`).
 - Standard-library regression tests for configuration persistence, untrusted
   input, source parsing, filtering, tooltip cache behavior and internal
   documentation links.
@@ -19,6 +32,14 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Streamed Pacman log parsing is roughly 4x faster (measured on a 2.5 MB,
+  12,500-entry log) via ISO-8601 fast-path decoding and non-ALPM line
+  pre-filtering.
+- Yearless Flatpak timestamps are parsed without `strptime("%b")`, avoiding the
+  Python 3.14+ deprecation warning for yearless dates.
+- Dynamic system palette and dark/light mode switching without requiring an
+  application restart.
+- Flatpak deploy timestamp discovery checks directory presence before globbing.
 - Pacman, Flatpak and package-detail I/O now runs in a bounded Qt worker pool so
   slow commands do not block the interface.
 - Search uses precomputed case-folded text per record and language.
@@ -29,6 +50,17 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The desktop entry uses `python3` and one standards-compliant main category.
 - Project documentation is split into stable entry, user, architecture,
   security, contribution and release-history documents.
+
+### Fixed
+
+- Flatpak history dates from months whose abbreviation differs in the user's
+  locale (e.g. "Mar", "May", "Oct", "Dec" on German systems) are no longer
+  shown without a date; month names no longer depend on `LC_TIME`, which
+  `QApplication` switches to the system locale.
+- Yearless Flatpak dates on February 29 resolve to the previous leap year
+  instead of being dropped.
+- Transient status messages (copied, exported, loading) no longer erase the
+  entry summary in the status bar.
 
 ### Security
 

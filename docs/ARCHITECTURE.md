@@ -64,10 +64,12 @@ workers.
 | `collect_update_data` | Raw Pacman/AUR/Flatpak collection without touching Qt widgets. |
 | `_LoadWorker` | Execute a complete collection outside the GUI thread. |
 | `_TooltipWorker` | Query one package's current metadata outside the GUI thread. |
+| `_DetailsWorker` | Query the detail rows for `PackageDetailsDialog` outside the GUI thread. |
 | `UpdateTableModel` | Store normalized rows and provide display, sort, color and tooltip roles. |
 | `UpdateFilterProxy` | Apply text/source/action filters and sorting. |
 | `BadgeDelegate` | Paint source and action badges without per-cell widgets. |
-| `ActivityChart` | Draw and hit-test the filtered per-day chart with `QPainter`. |
+| `PackageDetailsDialog` | Detailed package view with clickable URLs and clipboard export. |
+| `ActivityChart` | Draw, hit-test and interactive filtering for the per-day chart with `QPainter`. |
 | `MainWindow` | Own UI state, workers, translation, enrichment, aggregates and export. |
 
 ## Data collection and normalization
@@ -128,6 +130,8 @@ One `QThreadPool` owned by `MainWindow` has at most three active threads:
 
 - one high-priority full-data load can be active;
 - tooltip tasks share the remaining capacity;
+- one high-priority package-details query (for the dialog) can be active; the
+  dialog opens only when its result arrives;
 - the reload button and `_load_worker` guard prevent overlapping full loads;
 - at most 12 tooltip requests can be queued/running;
 - completed tooltip HTML is stored in a 256-entry LRU cache.
