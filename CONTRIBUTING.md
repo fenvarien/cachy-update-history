@@ -68,6 +68,10 @@ docs: explain AUR classification limits
 
 ## Required checks
 
+GitHub Actions (`.github/workflows/ci.yml`) compiles the sources and runs the
+regression suite on Python 3.10 and 3.14 for every pull request and push to
+`master`. Run the same checks locally before pushing.
+
 Run the regression suite:
 
 ```text
