@@ -7,6 +7,7 @@ Built for [CachyOS](https://cachyos.org/) and other Arch-based distributions.
 On systems without Pacman or Flatpak, unavailable sources are skipped without
 preventing the rest of the app from loading.
 
+[![CI](https://github.com/fenvarien/cachy-update-history/actions/workflows/ci.yml/badge.svg)](https://github.com/fenvarien/cachy-update-history/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41cd52)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)

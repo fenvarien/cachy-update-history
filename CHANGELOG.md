@@ -9,6 +9,8 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- GitHub Actions CI compiling the sources and running the test suite on
+  Python 3.10 and 3.14 for pull requests and pushes to `master`.
 - Multi-token and multi-field search allowing users to filter by package,
   versions (old and new), date/time, source, and action in any term order.
 - Interactive activity chart enabling users to click any date bar to instantly

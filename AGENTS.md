@@ -34,6 +34,7 @@ Agents modifying this codebase must adhere to the following constraints:
 ## Verification Commands
 
 Run these checks before finalizing any change:
+(CI in `.github/workflows/ci.yml` runs the first two on Python 3.10 and 3.14.)
 
 ```text
 # Run test suite with deprecation warnings treated as errors
