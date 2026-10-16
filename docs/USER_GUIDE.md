@@ -49,22 +49,27 @@ still displayed when the `flatpak` command is available.
 
 ## Desktop integration
 
-Copy the script and desktop entry to stable per-user locations:
+Install the script and desktop entry to stable per-user locations. The `sed`
+call fills in your home directory, and the commands work unchanged in fish,
+Bash and Zsh:
 
 ```text
 mkdir -p ~/.local/bin ~/.local/share/applications
-cp cachy-update-history.py ~/.local/bin/
-cp cachy-update-history.desktop ~/.local/share/applications/
+install -m 755 cachy-update-history.py ~/.local/bin/
+sed "s|/home/YOUR_USERNAME|$HOME|" cachy-update-history.desktop > ~/.local/share/applications/cachy-update-history.desktop
+update-desktop-database ~/.local/share/applications
 ```
 
-Then open
-`~/.local/share/applications/cachy-update-history.desktop` and replace
-`YOUR_USERNAME` in the `Exec=` line with the actual home-directory component.
-The resulting command should point to the copied script, for example:
+The resulting command points to the installed script, for example:
 
 ```ini
 Exec=python3 /home/alex/.local/bin/cachy-update-history.py
 ```
+
+Keep the file name `cachy-update-history.desktop`: the app announces it as its
+desktop file (Wayland app id), which is how the task bar shows the
+`system-software-update` icon for the running window. To update later, repeat
+the `install` line.
 
 The entry normally appears in the system application menu automatically. Some
 desktop environments may require signing out and back in after changing menu
