@@ -375,6 +375,11 @@ _YEARLESS_TS_PATTERN = re.compile(
 _MONTHS = {name: i for i, name in enumerate(
     ("jan", "feb", "mar", "apr", "may", "jun",
      "jul", "aug", "sep", "oct", "nov", "dec"), start=1)}
+# `pacman -Qi` dates under LC_ALL=C, e.g. "Tue Oct 20 18:55:29 2026".
+_PACMAN_DATE_PATTERN = re.compile(
+    r"[A-Za-z]{3} +(?P<mon>[A-Za-z]{3}) +(?P<day>\d{1,2}) +"
+    r"(?P<h>\d{1,2}):(?P<m>\d{2}):(?P<s>\d{2}) +(?P<y>\d{4})\Z"
+)
 
 
 def _valid_flatpak_app_id(appid):
@@ -955,6 +960,25 @@ def _tt_row(label, value):
             f"<td style='vertical-align:top;'>{value}</td></tr>")
 
 
+def _format_pacman_date(raw):
+    """Show a C-locale `pacman -Qi` date as language-neutral ISO text.
+
+    Pacman runs with LC_ALL=C, so its dates are English ("Tue Oct 20 …");
+    the month table keeps this independent of LC_TIME. Unknown formats are
+    returned unchanged.
+    """
+    m = _PACMAN_DATE_PATTERN.match(raw.strip()) if raw else None
+    month = _MONTHS.get(m.group("mon").casefold()) if m else None
+    if month is None:
+        return raw
+    try:
+        dt = datetime(int(m.group("y")), month, int(m.group("day")),
+                      int(m.group("h")), int(m.group("m")), int(m.group("s")))
+    except ValueError:
+        return raw
+    return dt.strftime("%Y-%m-%d  %H:%M:%S")
+
+
 def _pkg_fields(rec, lang=None):
     """Query and return the (label, value) detail rows for a package.
 
@@ -991,7 +1015,7 @@ def _pkg_fields(rec, lang=None):
         (tr("tt_version", lang),      info.get("Version")),
         (tr("tt_licenses", lang),     info.get("Licenses")),
         (tr("tt_size", lang),         info.get("Installed Size")),
-        (tr("tt_install_date", lang), info.get("Install Date")),
+        (tr("tt_install_date", lang), _format_pacman_date(info.get("Install Date"))),
         (tr("tt_url", lang),          info.get("URL")),
     ]
 

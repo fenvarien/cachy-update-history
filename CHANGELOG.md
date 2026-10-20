@@ -7,6 +7,13 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The package install date in the details dialog and tooltip is shown as
+  `YYYY-MM-DD  HH:MM:SS`, like the table, instead of Pacman's English
+  C-locale text (e.g. "Tue Oct 20 …") in the German interface; README
+  screenshots updated accordingly.
+
 ## [1.2.0] - 2026-10-20
 
 ### Added
