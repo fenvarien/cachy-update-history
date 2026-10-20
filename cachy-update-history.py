@@ -137,7 +137,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 LOG_PATH = "/var/log/pacman.log"
 ACCENT = "#3DAEE9"
 

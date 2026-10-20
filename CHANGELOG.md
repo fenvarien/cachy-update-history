@@ -7,6 +7,8 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-20
+
 ### Fixed
 
 - The package install date in the details dialog and tooltip is shown as
@@ -125,7 +127,8 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Argument-list subprocess execution, atomic config writes and streamed Pacman
   log parsing.
 
-[Unreleased]: https://github.com/fenvarien/cachy-update-history/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/fenvarien/cachy-update-history/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/fenvarien/cachy-update-history/releases/tag/v1.2.1
 [1.2.0]: https://github.com/fenvarien/cachy-update-history/releases/tag/v1.2.0
 [1.1.0]: https://github.com/fenvarien/cachy-update-history/releases/tag/v1.1.0
 [1.0.0]: https://github.com/fenvarien/cachy-update-history/releases/tag/v1.0.0
