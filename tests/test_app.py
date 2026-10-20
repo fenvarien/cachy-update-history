@@ -76,6 +76,24 @@ class InputSafetyTests(unittest.TestCase):
             ["/usr/bin/pacman", "-Qi", "--", "--config"]
         )
 
+    def test_pacman_install_date_is_language_neutral(self):
+        info = {"Install Date": "Tue Oct 20 18:55:29 2026"}
+        with (
+            mock.patch.object(APP, "_command_path", return_value="/usr/bin/pacman"),
+            mock.patch.object(APP, "_query_kv", return_value=(None, info)),
+        ):
+            for lang in ("en", "de"):
+                with self.subTest(lang=lang):
+                    fields = dict(APP._pkg_fields(
+                        {"source_key": "pacman", "pkg": "firefox"}, lang))
+                    self.assertEqual(fields[APP.tr("tt_install_date", lang)],
+                                     "2026-10-20  18:55:29")
+        self.assertEqual(APP._format_pacman_date("Mon Mar  3 09:05:01 2025"),
+                         "2025-03-03  09:05:01")
+        for raw in (None, "", "gestern", "Fri Feb 30 10:00:00 2026"):
+            with self.subTest(raw=raw):
+                self.assertEqual(APP._format_pacman_date(raw), raw)
+
 
 class DataAndPerformanceTests(unittest.TestCase):
     def test_collect_update_data_parses_pacman_and_marks_foreign_packages(self):
