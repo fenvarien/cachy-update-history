@@ -1,8 +1,8 @@
-from pathlib import Path
 import re
 import unittest
+from itertools import pairwise
+from pathlib import Path
 from urllib.parse import unquote
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LINK_PATTERN = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -86,7 +86,7 @@ class DocumentationTests(unittest.TestCase):
                 self.assertEqual(levels[0], 1)
                 self.assertEqual(levels.count(1), 1)
                 self.assertTrue(all(current <= previous + 1
-                                    for previous, current in zip(levels, levels[1:])))
+                                    for previous, current in pairwise(levels)))
                 self.assertEqual(text.count("```") % 2, 0)
 
     def test_changelog_has_single_unreleased_section(self):

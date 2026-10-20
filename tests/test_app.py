@@ -1,14 +1,13 @@
 import importlib.util
-from datetime import datetime
 import locale
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
+from pathlib import Path
 from unittest import mock
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -244,14 +243,14 @@ class DataAndPerformanceTests(unittest.TestCase):
         script = str(PROJECT_ROOT / "cachy-update-history.py")
         res_v = subprocess.run(
             [sys.executable, script, "--version"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, check=False,
         )
         self.assertEqual(res_v.returncode, 0)
         self.assertIn(APP.__version__, res_v.stdout)
 
         res_h = subprocess.run(
             [sys.executable, script, "--help"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, check=False,
         )
         self.assertEqual(res_h.returncode, 0)
         self.assertIn("Usage:", res_h.stdout)
