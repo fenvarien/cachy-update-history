@@ -20,14 +20,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Documented minimum and the current CachyOS/Arch interpreter.
-        python: ["3.10", "3.14"]
+        # Documented minimum (end-of-life, kept while PyQt6 supports it),
+        # the current CachyOS/Arch interpreter and the newest release.
+        python: ["3.10", "3.14", "3.15"]
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip

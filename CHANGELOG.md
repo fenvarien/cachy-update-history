@@ -10,7 +10,7 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - GitHub Actions CI compiling the sources and running the test suite on
-  Python 3.10 and 3.14 for pull requests and pushes to `master`.
+  Python 3.10, 3.14 and 3.15 for pull requests and pushes to `master`.
 - Multi-token and multi-field search allowing users to filter by package,
   versions (old and new), date/time, source, and action in any term order.
 - Interactive activity chart enabling users to click any date bar to instantly
@@ -48,7 +48,13 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Tooltip work is bounded by a 256-entry LRU cache, a 12-request queue and three
   worker threads.
 - The documented minimum runtime is Python 3.10; PyQt6 remains within major
-  version 6.
+  version 6. Python 3.10 reached end of life in October 2026: it is still
+  tested and supported by the code, but upgrading the interpreter is
+  recommended (see the [Security policy](SECURITY.md)).
+- CI uses `actions/checkout` and `actions/setup-python` v7.
+- Source and tests pass the Ruff linter without findings (sorted imports,
+  explicit `check=False` on subprocess calls, no behavior changes); the
+  application script is now executable.
 - The desktop entry uses `python3` and one standards-compliant main category.
 - Project documentation is split into stable entry, user, architecture,
   security, contribution and release-history documents.

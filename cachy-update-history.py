@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #
 # CachyOS Update History — package update history for Pacman, AUR and Flatpak.
 # Copyright (C) 2026 fenvarien
@@ -73,34 +72,68 @@ will show up as "Pacman". This is the most reliable heuristic available
 without an external database.
 """
 
-import sys
-import os
-import re
 import csv
 import glob
 import json
+import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
-from collections import OrderedDict, Counter
+from collections import Counter, OrderedDict
 from datetime import datetime
 from html import escape as _esc
 
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTableView, QHeaderView, QPushButton, QLineEdit, QComboBox,
-    QLabel, QStyledItemDelegate, QStyle, QFileDialog, QMessageBox,
-    QAbstractItemView, QToolTip, QDialog, QFormLayout, QScrollArea,
-    QFrame, QMenu,
+from PyQt6.QtCore import (
+    QAbstractTableModel,
+    QEvent,
+    QModelIndex,
+    QObject,
+    QRectF,
+    QRunnable,
+    QSize,
+    QSortFilterProxyModel,
+    Qt,
+    QThreadPool,
+    QTimer,
+    pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QColor, QPainter, QFont, QIcon, QPalette, QLinearGradient, QPainterPath,
-    QCursor, QKeySequence, QShortcut,
+    QColor,
+    QCursor,
+    QFont,
+    QIcon,
+    QKeySequence,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QShortcut,
 )
-from PyQt6.QtCore import (
-    Qt, QRectF, QSize, QTimer, QAbstractTableModel, QModelIndex,
-    QSortFilterProxyModel, QObject, QRunnable, QThreadPool, pyqtSignal,
-    QEvent,
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QStyle,
+    QStyledItemDelegate,
+    QTableView,
+    QToolTip,
+    QVBoxLayout,
+    QWidget,
 )
 
 __version__ = "1.2.0"
@@ -435,7 +468,7 @@ def get_foreign_packages():
         return set()
     try:
         out = subprocess.run([pacman, "-Qmq"], capture_output=True,
-                             text=True, timeout=10)
+                             text=True, timeout=10, check=False)
         if out.returncode == 0:
             return set(out.stdout.split())
     except (FileNotFoundError, OSError, subprocess.SubprocessError):
@@ -451,7 +484,8 @@ def _run_flatpak(args):
     env = {**os.environ, "LC_ALL": "C"}
     try:
         out = subprocess.run([flatpak, *args], capture_output=True,
-                             text=True, timeout=20, env=env)
+                             text=True, timeout=20, env=env,
+                             check=False)
         if out.returncode == 0:
             return out.stdout
     except (FileNotFoundError, OSError, subprocess.SubprocessError):
@@ -872,7 +906,7 @@ def _query_kv(args):
     """
     try:
         out = subprocess.run(args, capture_output=True, text=True, timeout=10,
-                             env={**os.environ, "LC_ALL": "C"})
+                             env={**os.environ, "LC_ALL": "C"}, check=False)
     except (FileNotFoundError, OSError, subprocess.SubprocessError):
         return None
     if out.returncode != 0:
@@ -1041,7 +1075,7 @@ class _LoadWorker(QRunnable):
     def run(self):
         try:
             self.signals.completed.emit(collect_update_data(self.log_path))
-        except Exception as exc:  # keep unexpected I/O/tool failures out of Qt
+        except Exception as exc:  # noqa: BLE001 - keep unexpected I/O/tool failures out of Qt
             self.signals.failed.emit(str(exc))
 
 
@@ -1061,7 +1095,7 @@ class _DetailsWorker(QRunnable):
     def run(self):
         try:
             fields = _pkg_fields(self.rec, self.lang)
-        except Exception:
+        except Exception:  # noqa: BLE001 - the dialog falls back to basic fields
             fields = None
         self.signals.completed.emit(fields)
 
@@ -1083,9 +1117,12 @@ class _TooltipWorker(QRunnable):
         try:
             html = _render_tooltip(self.rec, self.lang)
             self.signals.completed.emit(self.key, html)
-        except Exception:
+        except Exception:  # noqa: BLE001 - a failed tooltip must not reach Qt
             self.signals.failed.emit(self.key)
 
+
+# Default parent for flat-model methods (avoids a call in the signature).
+_ROOT_INDEX = QModelIndex()
 
 # Custom item-data roles used by the model below.
 COLOR_ROLE = Qt.ItemDataRole.UserRole + 1   # badge color for source/action cells
@@ -1118,10 +1155,10 @@ class UpdateTableModel(QAbstractTableModel):
         self._pending_tooltips.clear()
         self.endResetModel()
 
-    def rowCount(self, parent=QModelIndex()):
+    def rowCount(self, parent=_ROOT_INDEX):
         return 0 if parent.isValid() else len(self.rows)
 
-    def columnCount(self, parent=QModelIndex()):
+    def columnCount(self, parent=_ROOT_INDEX):
         # Called constantly by the view; avoid building a translated list here.
         return len(self._COLS)
 
@@ -1550,7 +1587,7 @@ class ActivityChart(QWidget):
             except ValueError:
                 return iso
 
-        for i in sorted(set([0, n // 2, n - 1])):
+        for i in sorted({0, n // 2, n - 1}):
             x = chart_left + i * (bar_w + gap)
             painter.drawText(QRectF(x - 22, chart_bottom + 4, bar_w + 44, 18),
                              Qt.AlignmentFlag.AlignCenter, fmt_day(self.data[i][0]))
@@ -1615,13 +1652,13 @@ class MainWindow(QMainWindow):
 
         self.source_combo = QComboBox()
         self.source_combo.addItem(tr("all_sources"), None)
-        for key, _color in SOURCES.items():
+        for key in SOURCES:
             self.source_combo.addItem(tr(f"src_{key}"), key)
         self.source_combo.currentIndexChanged.connect(self.apply_filters)
 
         self.action_combo = QComboBox()
         self.action_combo.addItem(tr("all_actions"), None)
-        for key, _color in ACTIONS.items():
+        for key in ACTIONS:
             self.action_combo.addItem(tr(f"act_{key}"), key)
         self.action_combo.currentIndexChanged.connect(self.apply_filters)
 
@@ -1828,12 +1865,12 @@ class MainWindow(QMainWindow):
             self.search_input.setText(day)
 
     def eventFilter(self, source, event):
-        if source == self.table and event.type() == QEvent.Type.KeyPress:
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                idx = self.table.currentIndex()
-                if idx.isValid():
-                    self._on_row_double_clicked(idx)
-                    return True
+        if (source == self.table and event.type() == QEvent.Type.KeyPress
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)):
+            idx = self.table.currentIndex()
+            if idx.isValid():
+                self._on_row_double_clicked(idx)
+                return True
         return super().eventFilter(source, event)
 
     def changeEvent(self, event):
@@ -1897,7 +1934,7 @@ class MainWindow(QMainWindow):
         self.source_combo.blockSignals(True)
         self.source_combo.clear()
         self.source_combo.addItem(tr("all_sources"), None)
-        for key, _color in SOURCES.items():
+        for key in SOURCES:
             self.source_combo.addItem(tr(f"src_{key}"), key)
         self.source_combo.setCurrentIndex(max(0, self.source_combo.findData(src_key)))
         self.source_combo.blockSignals(False)
@@ -1906,7 +1943,7 @@ class MainWindow(QMainWindow):
         self.action_combo.blockSignals(True)
         self.action_combo.clear()
         self.action_combo.addItem(tr("all_actions"), None)
-        for key, _color in ACTIONS.items():
+        for key in ACTIONS:
             self.action_combo.addItem(tr(f"act_{key}"), key)
         self.action_combo.setCurrentIndex(max(0, self.action_combo.findData(act_key)))
         self.action_combo.blockSignals(False)
