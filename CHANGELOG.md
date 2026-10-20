@@ -7,6 +7,8 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-20
+
 ### Added
 
 - GitHub Actions CI compiling the sources and running the test suite on
@@ -58,9 +60,15 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The desktop entry uses `python3` and one standards-compliant main category.
 - Project documentation is split into stable entry, user, architecture,
   security, contribution and release-history documents.
+- README screenshots show the current interface with the package details
+  dialog in English and German.
 
 ### Fixed
 
+- Source and action badges in the selected table row stay readable instead of
+  disappearing into the accent-colored highlight.
+- The date column fits the full date and time and its header in both
+  languages instead of eliding the time.
 - On Wayland (and KDE on X11) the window now reports the
   `cachy-update-history` desktop file, so task bars show the launcher's icon
   instead of a generic one. The desktop entry must keep that file name.
@@ -110,6 +118,7 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Argument-list subprocess execution, atomic config writes and streamed Pacman
   log parsing.
 
-[Unreleased]: https://github.com/fenvarien/cachy-update-history/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/fenvarien/cachy-update-history/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/fenvarien/cachy-update-history/releases/tag/v1.2.0
 [1.1.0]: https://github.com/fenvarien/cachy-update-history/releases/tag/v1.1.0
 [1.0.0]: https://github.com/fenvarien/cachy-update-history/releases/tag/v1.0.0

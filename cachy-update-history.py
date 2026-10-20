@@ -103,6 +103,7 @@ from PyQt6.QtGui import (
     QColor,
     QCursor,
     QFont,
+    QFontMetrics,
     QIcon,
     QKeySequence,
     QLinearGradient,
@@ -1254,11 +1255,13 @@ class BadgeDelegate(QStyledItemDelegate):
     """
     def paint(self, painter, option, index):
         painter.save()
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, option.palette.highlight())
-
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""
         color = QColor(index.data(COLOR_ROLE) or "#888888")
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+            # A badge in its own color vanishes on an accent-colored
+            # highlight; use the highlighted-text color instead.
+            color = option.palette.highlightedText().color()
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         fm = option.fontMetrics
@@ -1726,7 +1729,17 @@ class MainWindow(QMainWindow):
         # which would scan every row on each refresh and stall large logs.
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Package
-        for col, width in ((0, 140), (1, 90), (2, 130), (4, 150), (5, 150)):
+        # The date column must fit "YYYY-MM-DD  HH:MM" and, in either
+        # language, its bold header plus the sort indicator.
+        header_font = QFont(hh.font())
+        header_font.setBold(True)
+        header_fm = QFontMetrics(header_font)
+        date_w = max(
+            140,
+            self.table.fontMetrics().horizontalAdvance("0000-00-00  00:00") + 36,
+            max(header_fm.horizontalAdvance(t["headers"][0]) for t in _T.values()) + 48,
+        )
+        for col, width in ((0, date_w), (1, 90), (2, 130), (4, 150), (5, 150)):
             hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
             self.table.setColumnWidth(col, width)
         root.addWidget(self.table, 1)

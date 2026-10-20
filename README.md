@@ -13,11 +13,12 @@ preventing the rest of the app from loading.
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)
 [![Release](https://img.shields.io/github/v/release/fenvarien/cachy-update-history)](https://github.com/fenvarien/cachy-update-history/releases/latest)
 
-![English UI with a package-detail tooltip](docs/screenshot-en.png)
+![English UI with the package details dialog](docs/screenshot-en.png)
 
-*English interface with on-demand package details.*
+*English interface: per-day activity chart, color-coded timeline and the
+package details dialog (double-click or Enter).*
 
-![German UI with a package-detail tooltip](docs/screenshot.png)
+![German UI with the package details dialog](docs/screenshot.png)
 
 *German interface; language and tooltip preferences persist across restarts.*
 
