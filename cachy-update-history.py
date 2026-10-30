@@ -41,7 +41,7 @@ Features
 
 Dependencies
 ------------
-Python 3.10 or newer is required. The only runtime dependency is PyQt6. On
+Python 3.11 or newer is required. The only runtime dependency is PyQt6. On
 Arch-based systems (CachyOS, Arch, EndeavourOS, ...) install it from the
 official repositories:
 
@@ -400,8 +400,7 @@ def parse_timestamp(raw):
     formats produced by `flatpak history`. Returns None if nothing matches.
     """
     raw = raw.strip()
-    # Fast path: ISO-8601 timestamps used by modern pacman logs (C-level
-    # parser; Python 3.10 rejects the "+0200" offset and uses strptime below).
+    # Fast path: ISO-8601 timestamps used by modern pacman logs (C-level parser).
     try:
         return datetime.fromisoformat(raw)
     except ValueError:
@@ -1249,11 +1248,20 @@ class UpdateFilterProxy(QSortFilterProxyModel):
         self._action_key = None
 
     def set_filters(self, text, source_key, action_key):
+        # Qt 6.10+ can update only rows; keep the Qt 6.5-compatible fallback.
+        begin_change = getattr(self, "beginFilterChange", None)
+        end_change = getattr(self, "endFilterChange", None)
+        modern_api = callable(begin_change) and callable(end_change)
+        if modern_api:
+            begin_change()
         self._text = text.casefold().strip()
         self._terms = self._text.split()
         self._source_key = source_key
         self._action_key = action_key
-        self.invalidateFilter()
+        if modern_api:
+            end_change(QSortFilterProxyModel.Direction.Rows)
+        else:
+            self.invalidateFilter()
 
     def accepts(self, rec):
         if self._source_key and rec["source_key"] != self._source_key:

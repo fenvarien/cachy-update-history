@@ -33,7 +33,7 @@ root privileges on Arch-based systems. Do not run the application with `sudo`.
 
 ### Other distributions
 
-Python 3.10 or newer and a Qt-capable desktop session are required. A virtual
+Python 3.11 or newer and a Qt-capable desktop session are required. A virtual
 environment keeps the PyQt6 package isolated from the system interpreter:
 
 ```text
@@ -46,6 +46,10 @@ python3 -m venv .venv
 
 Pacman data is absent when `/var/log/pacman.log` does not exist. Flatpak data is
 still displayed when the `flatpak` command is available.
+
+Use a maintained Python series with current security patches. See
+[Runtime security updates](../SECURITY.md#runtime-security-updates) for the
+required patch releases and distribution-specific upgrade guidance.
 
 ## Desktop integration
 
