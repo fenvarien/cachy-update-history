@@ -8,7 +8,7 @@ On systems without Pacman or Flatpak, unavailable sources are skipped without
 preventing the rest of the app from loading.
 
 [![CI](https://github.com/fenvarien/cachy-update-history/actions/workflows/ci.yml/badge.svg)](https://github.com/fenvarien/cachy-update-history/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41cd52)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)
 [![Release](https://img.shields.io/github/v/release/fenvarien/cachy-update-history)](https://github.com/fenvarien/cachy-update-history/releases/latest)
@@ -39,7 +39,7 @@ package details dialog (double-click or Enter).*
 
 Requirements:
 
-- Python 3.10 or newer;
+- Python 3.11 or newer, with current security updates;
 - PyQt6;
 - optionally the `pacman` executable for AUR classification/live details and
   `flatpak` for the Flatpak source.
@@ -65,6 +65,10 @@ python3 -m venv .venv
 
 The virtual-environment commands do not require shell activation and therefore
 work unchanged in fish, Bash and Zsh.
+
+Keep Python and Qt updated through your distribution or virtual environment.
+See the [runtime security guidance](SECURITY.md#runtime-security-updates) for
+current Python patch requirements and safe updates on Arch-based systems.
 
 ## Data sources
 

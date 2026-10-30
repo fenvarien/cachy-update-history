@@ -112,6 +112,11 @@ performs one explicit pass over `all_data` so the status line, statistics and
 chart receive the same record selection. Statistics and day buckets are then
 computed from that selection.
 
+On Qt 6.10 and newer, custom filter changes use `beginFilterChange()` and
+`endFilterChange(Direction.Rows)`. Older supported Qt versions retain the
+`invalidateFilter()` fallback; PyQt6 6.5 remains the minimum. This avoids the
+API scheduled for deprecation in Qt 6.13 without dropping older Qt runtimes.
+
 Important performance invariants:
 
 - never create a widget per table cell;

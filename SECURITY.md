@@ -19,9 +19,27 @@ The current release is always identified by the
 [GitHub Releases page](https://github.com/fenvarien/cachy-update-history/releases/latest),
 so this policy remains valid after the next version is published.
 
-Supported deployments also require a Python version that still receives
-security updates and a maintained PyQt6/Qt package from the operating system or
-Python package index.
+Supported deployments require Python 3.11 or newer in a series that still
+receives security updates, with the latest security patches applied, and a
+maintained PyQt6/Qt package from the operating system or Python package index.
+
+## Runtime security updates
+
+Python 3.10 reached end of life on October 1, 2026 and is no longer supported by
+this project. See the [Python version status](https://devguide.python.org/versions/).
+
+The [October 26, 2026 Python security releases](https://blog.python.org/2026/10/python-3152-31410-31318-31216-31118/)
+include 3.11.18, 3.12.16, 3.13.18, 3.14.10 and 3.15.2. Use at least the applicable
+patch release, or a distribution package with equivalent backported fixes;
+the application does not install or enforce these system updates itself.
+
+On CachyOS/Arch, update through the distribution's normal full-system upgrade
+(`sudo pacman -Syu`). Avoid a partial Python upgrade or replacing the system
+interpreter manually: PyQt6 and other compiled modules depend on the
+distribution's Python ABI. If an upstream security release has not reached the
+configured repositories yet, track its availability through the distribution.
+Recreate a virtual environment after upgrading its underlying Python when
+necessary; upgrading PyQt6 with pip does not upgrade Python itself.
 
 ## Report a vulnerability
 

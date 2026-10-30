@@ -7,6 +7,18 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Raise the minimum supported Python version to 3.11 and replace Python 3.10
+  with 3.11 in CI because Python 3.10 no longer receives security updates.
+- Use Qt's row-specific filter-change API on Qt 6.10 and newer, retaining the
+  existing fallback for PyQt6/Qt 6.5 through 6.9 ahead of Qt 6.13 deprecation.
+
+### Security
+
+- Document the October 26 Python security patch releases and distribution-safe
+  runtime updates; these system updates remain the user's responsibility.
+
 ## [1.2.1] - 2026-10-20
 
 ### Fixed

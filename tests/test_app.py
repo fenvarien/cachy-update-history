@@ -174,6 +174,56 @@ class DataAndPerformanceTests(unittest.TestCase):
         proxy.set_filters("firefox", None, None)
         self.assertFalse(proxy.accepts(rec))
 
+    def _check_proxy_filter_updates(self, proxy):
+        model = APP.UpdateTableModel()
+        model.set_rows([
+            {"pkg": "linux-cachyos", "source_key": "pacman",
+             "source_label": "Pacman", "action_key": "upgraded",
+             "action_label": "Upgraded"},
+            {"pkg": "example-aur", "source_key": "aur",
+             "source_label": "AUR", "action_key": "installed",
+             "action_label": "Installed"},
+            {"pkg": "org.example.App", "source_key": "flatpak",
+             "source_label": "Flatpak", "action_key": "upgraded",
+             "action_label": "Upgraded"},
+        ])
+        proxy.setSourceModel(model)
+        self.assertEqual(proxy.rowCount(), 3)
+        for filters, packages in (
+            (("", None, "upgraded"), ["linux-cachyos", "org.example.App"]),
+            (("", "aur", None), ["example-aur"]),
+            (("EXAMPLE upgraded", "flatpak", "upgraded"), ["org.example.App"]),
+            (("missing", None, None), []),
+            (("", None, None), ["linux-cachyos", "example-aur", "org.example.App"]),
+        ):
+            with self.subTest(filters=filters):
+                proxy.set_filters(*filters)
+                self.assertEqual(
+                    [proxy.index(row, 3).data() for row in range(proxy.rowCount())],
+                    packages,
+                )
+                self.assertEqual(proxy.columnCount(), 6)
+
+    def test_filter_updates_attached_model_with_modern_qt_api(self):
+        proxy = APP.UpdateFilterProxy()
+        if not callable(getattr(proxy, "endFilterChange", None)):
+            self.skipTest("Qt 6.10 filter-change API not available")
+        with mock.patch.object(
+            proxy, "invalidateFilter",
+            side_effect=AssertionError("Modern Qt must use the filter-change API"),
+        ):
+            self._check_proxy_filter_updates(proxy)
+
+    def test_filter_updates_attached_model_without_modern_qt_api(self):
+        proxy = APP.UpdateFilterProxy()
+        with (
+            mock.patch.object(proxy, "endFilterChange", None, create=True),
+            mock.patch.object(proxy, "invalidateFilter",
+                              wraps=proxy.invalidateFilter) as invalidate,
+        ):
+            self._check_proxy_filter_updates(proxy)
+        self.assertEqual(invalidate.call_count, 5)
+
     def test_parse_timestamp_iso_and_legacy(self):
         # Modern ISO-8601 pacman format
         dt_iso = APP.parse_timestamp("2026-09-17T22:02:59+0200")

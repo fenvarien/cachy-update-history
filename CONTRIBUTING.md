@@ -14,7 +14,8 @@ to review and safest for a local system-information application.
 
 ## Development setup
 
-Python 3.10 or newer is supported. On CachyOS/Arch, prefer the system PyQt6:
+Python 3.11 or newer is supported; use the latest security patch in your series.
+On CachyOS/Arch, prefer the system PyQt6:
 
 ```text
 sudo pacman -S python-pyqt6
@@ -69,7 +70,7 @@ docs: explain AUR classification limits
 ## Required checks
 
 GitHub Actions (`.github/workflows/ci.yml`) compiles the sources and runs the
-regression suite on Python 3.10, 3.14 and 3.15 for every pull request and push to
+regression suite on Python 3.11, 3.14 and 3.15 for every pull request and push to
 `master`. Run the same checks locally before pushing.
 
 Run the regression suite:
