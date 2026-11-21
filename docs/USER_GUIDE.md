@@ -121,9 +121,11 @@ Its state is remembered across restarts.
 ### Read the activity chart
 
 The chart counts visible records per calendar day and follows all active
-filters. It shows the 30 most recent days that contain activity. Hovering a bar
-shows its date and exact count; clicking a bar filters the timeline to that
-specific day (clicking it again clears the filter).
+filters. It shows the 30 most recent days that contain activity. The summary
+above it groups the total and package sources on one line and actions on the
+next. Counts appear above bars when there is enough space. With **Details**
+enabled, hovering a bar shows its date and exact count. Clicking a bar filters
+the timeline to that specific day (clicking it again clears the filter).
 
 ### Shortcuts and context menu
 

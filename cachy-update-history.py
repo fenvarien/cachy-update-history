@@ -785,7 +785,7 @@ def apply_theme(app):
 
 _STYLESHEET = """
 QWidget#central {{ background:{bg}; }}
-QLabel#subtitle {{ color:{muted}; }}
+QLabel#subtitle {{ color:{text}; }}
 
 QLineEdit {{
     background:{field}; border:1px solid {border}; border-radius:9px;
@@ -1449,6 +1449,10 @@ class ActivityChart(QWidget):
     requirement remains PyQt6.
     """
     bar_clicked = pyqtSignal(str)
+    _TITLE_GAP = 8
+    _COUNT_GAP = 4
+    _DATE_GAP = 6
+    _VERTICAL_MARGIN = 14
 
     def __init__(self):
         super().__init__()
@@ -1456,25 +1460,41 @@ class ActivityChart(QWidget):
         self.tooltips_enabled = _TOOLTIPS_ENABLED
         self._hover = None            # index of the bar under the cursor
         self._plot = None             # cached geometry for hit-testing
-        self.setMinimumHeight(180)
         self.setMouseTracking(True)
 
     def set_data(self, data):
         self.data = data
         self._hover = None
+        self._plot = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
+
+    def _title_font(self):
+        font = QFont(self.font())
+        font.setBold(True)
+        return font
+
+    def minimumSizeHint(self):
+        title_height = QFontMetrics(self._title_font(), self).height()
+        label_height = self.fontMetrics().height()
+        spacing = (2 * self._VERTICAL_MARGIN + self._TITLE_GAP
+                   + self._COUNT_GAP + self._DATE_GAP)
+        return QSize(0, max(180, title_height + 2 * label_height + spacing + 80))
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.FontChange:
+            self.updateGeometry()
+        super().changeEvent(event)
 
     # ----- Hover interaction ------------------------------------------------
     def _bar_at(self, pos):
         """Return the data index for the column under a point, or None."""
         if not self._plot or not self.data:
             return None
-        left, top, bottom, step = self._plot
-        if pos.y() < top - 6 or pos.y() > bottom + 4:
+        plot, step = self._plot
+        if not plot.contains(pos) or pos.x() >= plot.right():
             return None
-        idx = int((pos.x() - left) // step)
-        return idx if 0 <= idx < len(self.data) else None
+        return min(int((pos.x() - plot.left()) // step), len(self.data) - 1)
 
     def mouseMoveEvent(self, event):
         idx = self._bar_at(event.position())
@@ -1484,9 +1504,9 @@ class ActivityChart(QWidget):
             self.update()
         if idx is not None and self.tooltips_enabled:
             day, count = self.data[idx]
-            hint = f"<br><span style='font-size:9px;color:{_UI['muted']};'>{_esc(tr('chart_hint'))}</span>"
+            hint = _esc(tr("chart_hint"))
             QToolTip.showText(event.globalPosition().toPoint(),
-                              f"<b>{_esc(day)}</b><br>{count} &times;{hint}", self)
+                              f"<b>{_esc(day)}</b><br>{count} &times;<br>{hint}", self)
         else:
             QToolTip.hideText()
 
@@ -1522,7 +1542,7 @@ class ActivityChart(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         pal = self.palette()
-        text_color = pal.color(QPalette.ColorRole.WindowText)
+        text_color = pal.color(QPalette.ColorRole.Text)
         accent = pal.color(QPalette.ColorRole.Highlight)
         base = pal.color(QPalette.ColorRole.Base)
 
@@ -1537,95 +1557,91 @@ class ActivityChart(QWidget):
         painter.drawRoundedRect(card, 12, 12)
         painter.setPen(Qt.PenStyle.NoPen)
 
-        inner = card.adjusted(16, 13, -16, -13)
+        inner = QRectF(self.rect()).adjusted(
+            17, self._VERTICAL_MARGIN, -17, -self._VERTICAL_MARGIN)
 
-        # Title
-        title_font = QFont(self.font())
-        title_font.setBold(True)
+        title_font = self._title_font()
+        title_height = QFontMetrics(title_font, self).height()
+        labels = self.fontMetrics()
+        label_height = labels.height()
+        title = QRectF(inner.left(), inner.top(), inner.width(), title_height)
         painter.setFont(title_font)
         painter.setPen(text_color)
         painter.drawText(
-            QRectF(inner.left(), inner.top(), inner.width(), 20),
+            title,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             tr("chart_title"),
         )
         painter.setFont(self.font())
 
-        if not self.data:
+        plot_top = title.bottom() + self._TITLE_GAP + label_height + self._COUNT_GAP
+        plot_bottom = inner.bottom() - self._DATE_GAP - label_height
+        plot = QRectF(inner.left(), plot_top, inner.width(), plot_bottom - plot_top)
+        if not self.data or plot.isEmpty():
             self._plot = None
-            faded = QColor(text_color)
-            faded.setAlpha(130)
-            painter.setPen(faded)
-            painter.drawText(inner, Qt.AlignmentFlag.AlignCenter,
-                             tr("chart_no_data"))
+            if not self.data:
+                message = inner.adjusted(0, title_height + self._TITLE_GAP, 0, 0)
+                painter.drawText(message, Qt.AlignmentFlag.AlignCenter,
+                                 tr("chart_no_data"))
             painter.end()
             return
 
-        top_pad = 30
-        bottom_pad = 26
-        chart_top = inner.top() + top_pad
-        chart_bottom = inner.bottom() - bottom_pad
-        chart_h = chart_bottom - chart_top
-        chart_left = inner.left()
-        chart_w = inner.width()
-
         n = len(self.data)
         max_count = max(c for _, c in self.data) or 1
-        gap = max(2.0, min(8.0, chart_w / n * 0.25))
-        bar_w = max(2.0, (chart_w - gap * (n - 1)) / n)
-        step = bar_w + gap
-        self._plot = (chart_left, chart_top, chart_bottom, step)
+        step = plot.width() / n
+        gap = min(8.0, step * 0.25)
+        bar_w = step - gap
+        self._plot = (plot, step)
 
         # Faint baseline for the bars to sit on.
         baseline = _mix(base, text_color, 0.12)
         painter.setPen(baseline)
-        painter.drawLine(int(chart_left), int(chart_bottom) + 1,
-                         int(chart_left + chart_w), int(chart_bottom) + 1)
+        painter.drawLine(int(plot.left()), int(plot.bottom()) + 1,
+                         int(plot.right()), int(plot.bottom()) + 1)
         painter.setPen(Qt.PenStyle.NoPen)
 
         # Gradient endpoints: a vivid accent on top fading to a translucent
         # version at the baseline, giving the bars depth on any theme.
         grad_bottom = _mix(accent, base, 0.45)
         hover_top = _mix(accent, QColor("#ffffff"), 0.25)
-        label_color = QColor(text_color)
-        label_color.setAlpha(150)
-        small_font = QFont(self.font())
-        small_font.setPointSizeF(max(7.0, self.font().pointSizeF() - 1.5))
-
-        # Bars (a count label on top when the bar is wide enough, or on hover)
-        for i, (day, count) in enumerate(self.data):
-            bar_h = max(2.0, chart_h * count / max_count)
-            x = chart_left + i * step
-            y = chart_bottom - bar_h
+        for i, (_, count) in enumerate(self.data):
+            bar_h = min(plot.height(), max(2.0, plot.height() * count / max_count))
+            slot_left = plot.left() + i * step
+            x = slot_left + gap / 2
+            y = plot.bottom() - bar_h
             rect = QRectF(x, y, bar_w, bar_h)
             hovered = (i == self._hover)
-            grad = QLinearGradient(x, y, x, chart_bottom)
+            grad = QLinearGradient(x, y, x, plot.bottom())
             grad.setColorAt(0.0, hover_top if hovered else accent)
             grad.setColorAt(1.0, accent if hovered else grad_bottom)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(grad)
             painter.drawPath(self._top_rounded(rect, min(4.0, bar_w / 2)))
-            if bar_w >= 22 or hovered:
-                painter.setFont(small_font)
-                painter.setPen(accent if hovered else text_color)
-                painter.drawText(QRectF(x - 6, y - 16, bar_w + 12, 14),
-                                 Qt.AlignmentFlag.AlignCenter, str(count))
+            label = str(count)
+            if labels.horizontalAdvance(label) + 4 <= step:
+                painter.setPen(text_color)
+                painter.drawText(
+                    QRectF(slot_left + 2, y - self._COUNT_GAP - label_height,
+                           step - 4, label_height),
+                    Qt.AlignmentFlag.AlignCenter, label,
+                )
                 painter.setPen(Qt.PenStyle.NoPen)
 
-        # X-axis labels: first, middle and last day
-        painter.setFont(small_font)
-        painter.setPen(label_color)
-
-        def fmt_day(iso):
-            try:
-                return datetime.strptime(iso, "%Y-%m-%d").strftime("%m-%d")
-            except ValueError:
-                return iso
-
-        for i in sorted({0, n // 2, n - 1}):
-            x = chart_left + i * (bar_w + gap)
-            painter.drawText(QRectF(x - 22, chart_bottom + 4, bar_w + 44, 18),
-                             Qt.AlignmentFlag.AlignCenter, fmt_day(self.data[i][0]))
+        # Give the outer dates priority when there is room for only two.
+        painter.setPen(text_color)
+        date_rects = []
+        for i in dict.fromkeys((0, n - 1, n // 2)):
+            day = self.data[i][0][5:]  # ISO date, displayed as MM-DD
+            width = labels.horizontalAdvance(day) + 4
+            if width > plot.width():
+                continue
+            center = plot.left() + (i + 0.5) * step
+            left = max(plot.left(), min(center - width / 2, plot.right() - width))
+            rect = QRectF(left, plot.bottom() + self._DATE_GAP, width, label_height)
+            if any(rect.adjusted(-4, 0, 4, 0).intersects(other) for other in date_rects):
+                continue
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, day)
+            date_rects.append(rect)
         painter.end()
 
 
@@ -1658,7 +1674,7 @@ class MainWindow(QMainWindow):
 
         # --- Header (title + subtitle) -------------------------------------
         header = QVBoxLayout()
-        header.setSpacing(1)
+        header.setSpacing(4)
         self.title_label = QLabel(tr("title_label"))
         tf = QFont(self.font())
         tf.setPointSizeF(self.font().pointSizeF() + 5)
@@ -1668,6 +1684,7 @@ class MainWindow(QMainWindow):
 
         self.subtitle_label = QLabel(tr("subtitle"))
         self.subtitle_label.setObjectName("subtitle")
+        self.subtitle_label.setWordWrap(True)
         sf = QFont(self.font())
         sf.setPointSizeF(max(8.0, self.font().pointSizeF() - 0.5))
         self.subtitle_label.setFont(sf)
@@ -1927,7 +1944,6 @@ class MainWindow(QMainWindow):
                              QEvent.Type.PaletteChange)
                 and apply_theme(QApplication.instance())):
             _TOOLTIP_CACHE.clear()      # cached tooltip HTML embeds old colors
-            self.apply_filters()        # stats line embeds the accent color
             self.chart.update()
         super().changeEvent(event)
 
@@ -2126,19 +2142,17 @@ class MainWindow(QMainWindow):
             for key, color in table.items():
                 if counts.get(key, 0) > 0:
                     label = tr(f"{prefix}{key}")
-                    out.append(f"<span style='color:{color};'>●</span>&nbsp;"
-                               f"{label}:&nbsp;<b>{counts[key]}</b>")
-            return "&nbsp;&nbsp;&nbsp;".join(out)
+                    out.append(f"<nobr><span style='color:{color};'>●</span>&nbsp;"
+                               f"{label}:&nbsp;<b>{counts[key]}</b></nobr>")
+            return " &nbsp; ".join(out)
 
-        sep = " &nbsp;&nbsp;|&nbsp;&nbsp; "
-        html = (f"<b>{tr('stats_total')}:</b>&nbsp;"
-                f"<b style='color:{_UI['accent']};'>{total}</b>")
+        html = f"<b>{tr('stats_total')}:&nbsp;{total}</b>"
         src_html = chips(src_counts, SOURCES, "src_")
         act_html = chips(act_counts, ACTIONS, "act_")
         if src_html:
-            html += sep + src_html
+            html += " &nbsp; " + src_html
         if act_html:
-            html += sep + act_html
+            html += "<br>" + act_html
         self.stats_label.setText(html)
 
     def update_chart(self, data):
