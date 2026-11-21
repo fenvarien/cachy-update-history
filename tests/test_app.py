@@ -9,12 +9,51 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
+from PyQt6.QtCore import QPointF
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
     "cachy_update_history", PROJECT_ROOT / "cachy-update-history.py"
 )
 APP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(APP)
+
+
+class ActivityChartTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with mock.patch.dict("os.environ", {"QT_QPA_PLATFORM": "offscreen"}):
+            cls.qt_app = APP.QApplication.instance() or APP.QApplication([])
+
+    def test_highest_count_clears_title_and_plot_matches_hit_testing(self):
+        class RecordingPainter(APP.QPainter):
+            def drawText(self, rect, flags, text):
+                drawn[text] = APP.QRectF(rect)
+                return super().drawText(rect, flags, text)
+
+        chart = APP.ActivityChart()
+        for font_size in (10, 24):
+            with self.subTest(font_size=font_size):
+                drawn = {}
+                font = chart.font()
+                font.setPointSize(font_size)
+                chart.setFont(font)
+                chart.resize(360, chart.minimumSizeHint().height())
+                chart.set_data([("2026-10-21", 38), ("2026-10-22", 157)])
+                with mock.patch.object(APP, "QPainter", RecordingPainter):
+                    chart.grab()
+
+                title = drawn[APP.tr("chart_title")]
+                count = drawn["157"]
+                plot, step = chart._plot
+                self.assertGreaterEqual(count.top() - title.bottom(), 8)
+                self.assertGreaterEqual(plot.top() - count.bottom(), 4)
+                self.assertEqual(chart._bar_at(QPointF(plot.left(), plot.top())), 0)
+                self.assertEqual(chart._bar_at(QPointF(plot.right() - 1, plot.top())), 1)
+                for point in (count.center(), drawn["10-22"].center(),
+                              QPointF(plot.left() - 1, plot.top()),
+                              QPointF(plot.left() + 2 * step, plot.top())):
+                    self.assertIsNone(chart._bar_at(point))
 
 
 class ConfigTests(unittest.TestCase):

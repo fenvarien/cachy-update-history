@@ -9,6 +9,8 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Improve spacing and contrast in the activity chart and group the header
+  statistics by package source and action.
 - Raise the minimum supported Python version to 3.11 and replace Python 3.10
   with 3.11 in CI because Python 3.10 no longer receives security updates.
 - Use Qt's row-specific filter-change API on Qt 6.10 and newer, retaining the

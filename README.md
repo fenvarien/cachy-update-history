@@ -26,7 +26,8 @@ package details dialog (double-click or Enter).*
 
 - Pacman, AUR and Flatpak changes in one model/view-based table.
 - Multi-token search matching packages, versions, dates, sources and actions in any order.
-- Interactive per-day activity chart; click any bar to filter the view by that day.
+- Interactive per-day activity chart with clearly spaced labels; click any bar
+  to filter the view by that day.
 - On-demand package details via hover tooltips or full dialog with clickable website links.
 - Context menu and keyboard shortcuts (Ctrl+F, Ctrl+C, F5, Ctrl+S, Escape).
 - High-performance streamed log parsing with C-level ISO-8601 parsing and ALPM pre-filtering.
