@@ -88,7 +88,8 @@ desktop-file-validate cachy-update-history.desktop
 - **Dynamic Theme Adaptation**: `MainWindow.changeEvent()` captures
   `PaletteChange` (how Qt 6 delivers a new application palette to windows) and
   re-runs `apply_theme()`, which is a no-op for an unchanged stylesheet and so
-  cannot loop. Tooltip cache and stats line are refreshed on change.
+  cannot loop. The tooltip cache is cleared and the activity chart repainted
+  when theme colors change.
 - **Shortcut Rule**: Register shortcut keys explicitly. Never combine a
   `QKeySequence.StandardKey` with an explicit key it already contains (e.g.
   `Refresh` already includes `F5` on Linux); duplicates are ambiguous and fire
