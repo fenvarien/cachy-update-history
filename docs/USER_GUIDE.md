@@ -9,6 +9,7 @@ that tag.
 - [Install and start](#install-and-start)
 - [Desktop integration](#desktop-integration)
 - [Use the interface](#use-the-interface)
+- [System diagnostics](#system-diagnostics)
 - [Understand the data](#understand-the-data)
 - [Configuration](#configuration)
 - [CSV export](#csv-export)
@@ -154,6 +155,41 @@ source and action labels, filters, status text and future tooltips use the new
 language. Package-manager descriptions remain in the stable `C` locale used to
 parse command output.
 
+## System diagnostics
+
+Open **System diagnostics** from the main window. The running app version is
+also visible in the main window's status bar.
+
+**System information** collects a snapshot of the operating system, kernel,
+desktop session, CPU, memory, graphics and assigned kernel drivers, disks,
+free root filesystem space and runtime versions. On Arch-based systems it can
+also show versions of selected installed graphics and firmware packages.
+Use **Refresh system information** for a fresh snapshot. Optional tools or
+fields that are unavailable are identified in the overview.
+
+In **System logs**, choose the system journal, your user journal, kernel
+messages or the current Pacman log. For journal sources you can select the
+current boot, the previous boot, the last hour, 24 hours or seven days, plus a
+minimum severity. Pacman offers the newest entries or the same time windows.
+Click **Load logs** to apply the query. The default entry limit is 500, with
+100 and 1,000 also available. The journal shows what your account can access.
+Previous boots require retained journal data. Pacman searches the current file's
+last 2 MiB, which can exclude older entries.
+
+Use **Filter loaded logs** or `Ctrl+F` to match terms across the loaded
+messages and service identifiers. Click a row or navigate with the arrow keys
+to inspect its message. Use **Prepare selected entries** (or `Ctrl+C` with
+the log table focused) or **Prepare visible entries**. To add system context,
+select **Include system information**. `F5` refreshes the active tab.
+
+The editable **Review report** preview provides space for the problem and
+steps to reproduce. It includes the query, time with UTC offset, status and
+messages in chronological order. The starting report is limited to 24,000
+characters and prefers the newest complete entries that fit. Automatic
+masking covers recognizable sensitive details and can miss private data in
+free text. Review and edit the report, then click **Copy preview** and paste
+it where you want to share it. The app keeps the report local.
+
 ## Understand the data
 
 ### Pacman
@@ -234,6 +270,9 @@ mv ~/.config/cachy-update-history.json ~/.config/cachy-update-history.json.backu
 **Export CSV** writes exactly the currently filtered and sorted rows. Headers
 use the active UI language. The file is UTF-8 encoded and uses Python's standard
 CSV quoting.
+
+Once you confirm a destination, the export writes the selected view in the
+background and replaces the destination atomically on success.
 
 Values beginning with a spreadsheet formula prefix or control character receive
 a leading apostrophe. This prevents package names or versions originating in

@@ -13,12 +13,12 @@ preventing the rest of the app from loading.
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)
 [![Release](https://img.shields.io/github/v/release/fenvarien/cachy-update-history)](https://github.com/fenvarien/cachy-update-history/releases/latest)
 
-![English UI with the package details dialog](docs/screenshot-en.png)
+![English update timeline with the System diagnostics button](docs/screenshot-en.png)
 
-*English interface: per-day activity chart, color-coded timeline and the
-package details dialog (double-click or Enter).*
+*English interface with sample update history, the activity chart and the
+System diagnostics entry point.*
 
-![German UI with the package details dialog](docs/screenshot.png)
+![German update timeline with the Systemdiagnose button](docs/screenshot.png)
 
 *German interface; language and tooltip preferences persist across restarts.*
 
@@ -33,6 +33,10 @@ package details dialog (double-click or Enter).*
 - High-performance streamed log parsing with C-level ISO-8601 parsing and ALPM pre-filtering.
 - Dynamic system palette and dark/light mode integration without application restart.
 - CSV export of the current filtered and sorted view.
+- System information with kernel, hardware, graphics drivers, storage and
+  runtime versions. The running app version is also visible in the status bar.
+- Searchable system, user, kernel and Pacman logs. Prepare selected entries
+  or visible results in an editable, locally masked report before copying.
 - English and German UI with native light/dark palette integration.
 - No root privileges, network service or background daemon required.
 
@@ -43,7 +47,9 @@ Requirements:
 - Python 3.11 or newer, with current security updates;
 - PyQt6;
 - optionally the `pacman` executable for AUR classification/live details and
-  `flatpak` for the Flatpak source.
+  `flatpak` for the Flatpak source;
+- optional system tools `journalctl`, `lspci` and `lsblk` for journal,
+  graphics and disk details in [System diagnostics](docs/USER_GUIDE.md#system-diagnostics).
 
 On CachyOS or Arch Linux:
 
@@ -103,6 +109,10 @@ are invoked without a shell, package arguments are separated from options,
 Flatpak IDs are validated before filesystem use, rich text is escaped and CSV
 formula prefixes are neutralized. Preferences use bounded parsing and private,
 atomic writes.
+
+Diagnostic reads are bounded and use the current account's access. Report
+preparation and masking happen locally. Review the editable preview for
+remaining private information before sharing it.
 
 Potentially slow log and subprocess work runs in a bounded Qt worker pool.
 Search strings are normalized once per record, and both tooltip cache and queue

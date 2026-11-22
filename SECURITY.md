@@ -1,8 +1,8 @@
 # Security policy
 
 CachyOS Update History is a local, unprivileged viewer. It reads package-manager
-history and current package metadata; it does not install packages, run a
-network service or require root.
+history, current package metadata, system inventory and accessible system
+logs. It runs locally with the invoking user's permissions.
 
 ## Supported versions
 
@@ -94,6 +94,7 @@ does not assume these inputs are well formed:
 - the app's JSON preference file;
 - package names and versions exported to CSV;
 - package metadata rendered in rich-text tooltips.
+- diagnostic commands, inventory data and journal/Pacman messages.
 
 Security reports are especially relevant when crafted input can:
 
@@ -119,6 +120,11 @@ Security reports are especially relevant when crafted input can:
   bounded.
 - The Pacman log is streamed rather than loaded as one raw string.
 - Regression tests cover principal input-validation and persistence controls.
+- Diagnostic subprocess output is byte-bounded and displayed as plain text,
+  with control characters escaped. Journal metadata and inventory fields use
+  an allowlist. The log viewer ignores executable directives in log content.
+- Diagnostic reports are kept in memory and copied only through the reviewed
+  preview. The app performs no network transfer.
 
 Implementation details and invariants are maintained in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -127,13 +133,17 @@ Implementation details and invariants are maintained in
 
 - The complete normalized history remains in memory, so retained history size
   still controls steady-state memory use.
-- Captured subprocess output is time-bounded but not currently byte-bounded.
+- Legacy package-manager command capture is time-bounded. The diagnostic
+  reader also sets byte limits.
 - A malicious executable selected through an already-compromised user `PATH`, a
   compromised Python/Qt runtime or arbitrary code running as the same user is
   outside the app's security boundary.
 - Package-manager correctness and the authenticity of system package metadata
   are delegated to Pacman, Flatpak and the operating system.
 - CSV export intentionally writes to a path selected and confirmed by the user.
+- Log redaction is heuristic. Review the full report before sharing. After
+  copying, other software such as a desktop clipboard manager can retain the
+  report according to its own settings.
 
 These limitations should not be described as vulnerabilities unless an attack
 crosses an additional trust boundary or produces impact beyond the stated model.

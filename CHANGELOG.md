@@ -7,8 +7,19 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- System diagnostics with a hardware and software snapshot, searchable
+  system, user, kernel and Pacman logs, and an editable report preview for
+  controlled sharing.
+- Show the running application version in the main status bar and include
+  it in system information.
+
 ### Changed
 
+- Move the language switch to the window header to make the timeline toolbar
+  fit narrower windows.
+- Save the filtered CSV view atomically in a background worker.
 - Improve spacing and contrast in the activity chart and group the header
   statistics by package source and action.
 - Raise the minimum supported Python version to 3.11 and replace Python 3.10
