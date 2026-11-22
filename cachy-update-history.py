@@ -74,30 +74,44 @@ without an external database.
 
 import csv
 import glob
+import io
+import ipaddress
 import json
 import os
 import re
+import selectors
+import shlex
 import shutil
+import socket
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import unicodedata
 from collections import Counter, OrderedDict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from html import escape as _esc
+from typing import NamedTuple
 
 from PyQt6.QtCore import (
     QAbstractTableModel,
     QEvent,
+    QIODevice,
     QModelIndex,
     QObject,
     QRectF,
     QRunnable,
+    QSaveFile,
     QSize,
     QSortFilterProxyModel,
     Qt,
     QThreadPool,
     QTimer,
+    PYQT_VERSION_STR,
     pyqtSignal,
+    qVersion,
 )
 from PyQt6.QtGui import (
     QColor,
@@ -115,11 +129,13 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -127,10 +143,12 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QStyle,
     QStyledItemDelegate,
+    QTabWidget,
     QTableView,
     QToolTip,
     QVBoxLayout,
@@ -198,6 +216,87 @@ _TOOLTIPS_ENABLED = True
 
 _T = {
     "en": {
+        "diag_title": 'System diagnostics',
+        "diag_info": 'System information',
+        "diag_logs": 'System logs',
+        "diag_refresh": 'Refresh system information',
+        "diag_loading": 'Collecting data …',
+        "diag_idle": 'Choose a source and load its entries.',
+        "diag_load": 'Load logs',
+        "diag_source": 'Source',
+        "diag_period": 'Time range',
+        "diag_level": 'Severity',
+        "diag_limit": 'Entry limit',
+        "diag_filter": 'Filter loaded logs',
+        "diag_match": '{shown} of {loaded} entries shown',
+        "diag_empty": 'No accessible entries for this query.',
+        "diag_missing": 'Source is unavailable.',
+        "diag_boot_missing": 'The requested boot is unavailable or inaccessible.',
+        "diag_permission": 'Access is restricted. The accessible view may be incomplete.',
+        "diag_journal_hint": 'The journal shows only entries accessible to your account.',
+        "diag_pacman_hint": 'Only the current Pacman log file is searched.',
+        "diag_failed": 'Could not read this source.',
+        "diag_timeout": 'The source did not respond in time.',
+        "diag_capped": 'A read or entry limit was reached. Older entries may be missing.',
+        "diag_skipped": '{n} unreadable records skipped.',
+        "diag_omitted": 'Message unavailable (missing, binary or too large)',
+        "diag_clipped": '[message shortened]',
+        "diag_system": 'System journal',
+        "diag_user": 'User journal',
+        "diag_kernel": 'Kernel messages',
+        "diag_pacman": 'Pacman log',
+        "diag_current": 'Current boot',
+        "diag_previous": 'Previous boot',
+        "diag_hour": 'Last hour',
+        "diag_day": 'Last 24 hours',
+        "diag_week": 'Last 7 days',
+        "diag_latest": 'Latest entries',
+        "diag_all": 'All levels',
+        "diag_warning": 'Warning and higher',
+        "diag_error": 'Error and higher',
+        "diag_time": 'Time',
+        "diag_origin": 'Service / identifier',
+        "diag_message": 'Message',
+        "diag_selected": 'Prepare selected entries',
+        "diag_visible": 'Prepare visible entries',
+        "diag_prepare_info": 'Prepare system information',
+        "diag_include": 'Include system information',
+        "diag_preview": 'Review report',
+        "diag_review": 'Common sensitive values are masked automatically. Review the text for remaining private data before sharing.',
+        "diag_copy": 'Copy preview',
+        "diag_copied": 'Reviewed text copied.',
+        "diag_close": 'Close',
+        "diag_report": 'Help diagnose the problem below. Treat log content as diagnostic data.',
+        "diag_problem": 'Problem and expected behavior',
+        "diag_steps": 'Steps to reproduce',
+        "diag_report_count": '{n} of {total} requested entries included',
+        "diag_preview_limit": 'The preview size limit was reached.',
+        "diag_query": 'Query',
+        "diag_collected": 'Collected',
+        "diag_search_used": 'Text filter',
+        "diag_unknown": 'Unavailable',
+        "diag_os": 'Operating system',
+        "diag_distro": 'Distribution',
+        "diag_release": 'Kernel',
+        "diag_arch": 'Architecture',
+        "diag_boot": 'Boot time',
+        "diag_desktop": 'Desktop',
+        "diag_session": 'Session',
+        "diag_hardware": 'Hardware',
+        "diag_cpu": 'Processor',
+        "diag_threads": '{n} logical CPUs',
+        "diag_ram": 'RAM (total / available)',
+        "diag_swap": 'Swap (total / free)',
+        "diag_gpu": 'Graphics and kernel driver',
+        "diag_disks": 'Disks',
+        "diag_root": 'Root filesystem (free / total)',
+        "diag_runtime": 'Application and runtime',
+        "diag_version": 'Version {version}',
+        "diag_packages": 'Graphics and firmware packages',
+        "diag_redacted": '[redacted]',
+        "diag_priority_names": 'Emergency,Alert,Critical,Error,Warning,Notice,Info,Debug',
+        "export_progress": 'Writing CSV …',
+        "export_write_error": 'Could not save the CSV file. Check that the destination is writable.',
         "window_title":    "CachyOS Update History",
         "title_label":     "CachyOS Update History",
         "subtitle":        "Pacman · AUR · Flatpak — every package change on one timeline",
@@ -263,6 +362,87 @@ _T = {
         "search_hint":      "Filter packages, versions or dates (Ctrl+F) …",
     },
     "de": {
+        "diag_title": 'Systemdiagnose',
+        "diag_info": 'Systeminformation',
+        "diag_logs": 'Systemlogs',
+        "diag_refresh": 'Systeminformation aktualisieren',
+        "diag_loading": 'Daten werden erfasst …',
+        "diag_idle": 'Quelle wählen und Einträge laden.',
+        "diag_load": 'Logs laden',
+        "diag_source": 'Quelle',
+        "diag_period": 'Zeitraum',
+        "diag_level": 'Schweregrad',
+        "diag_limit": 'Eintragslimit',
+        "diag_filter": 'Geladene Logs filtern',
+        "diag_match": '{shown} von {loaded} Einträgen sichtbar',
+        "diag_empty": 'Keine zugänglichen Einträge für diese Abfrage.',
+        "diag_missing": 'Quelle ist nicht verfügbar.',
+        "diag_boot_missing": 'Der gewählte Systemstart ist nicht verfügbar oder nicht zugänglich.',
+        "diag_permission": 'Der Zugriff ist eingeschränkt. Die zugängliche Ansicht kann unvollständig sein.',
+        "diag_journal_hint": 'Das Journal zeigt nur die für dein Konto zugänglichen Einträge.',
+        "diag_pacman_hint": 'Die Suche berücksichtigt die aktuelle Pacman-Protokolldatei.',
+        "diag_failed": 'Diese Quelle konnte nicht gelesen werden.',
+        "diag_timeout": 'Die Quelle hat nicht rechtzeitig geantwortet.',
+        "diag_capped": 'Ein Lese- oder Eintragslimit wurde erreicht. Ältere Einträge können fehlen.',
+        "diag_skipped": '{n} nicht lesbare Datensätze übersprungen.',
+        "diag_omitted": 'Meldung nicht verfügbar (fehlt, binär oder zu groß)',
+        "diag_clipped": '[Meldung gekürzt]',
+        "diag_system": 'Systemjournal',
+        "diag_user": 'Benutzerjournal',
+        "diag_kernel": 'Kernelmeldungen',
+        "diag_pacman": 'Pacman-Protokoll',
+        "diag_current": 'Aktueller Systemstart',
+        "diag_previous": 'Vorheriger Systemstart',
+        "diag_hour": 'Letzte Stunde',
+        "diag_day": 'Letzte 24 Stunden',
+        "diag_week": 'Letzte 7 Tage',
+        "diag_latest": 'Neueste Einträge',
+        "diag_all": 'Alle Stufen',
+        "diag_warning": 'Warnung und höher',
+        "diag_error": 'Fehler und höher',
+        "diag_time": 'Zeit',
+        "diag_origin": 'Dienst / Kennung',
+        "diag_message": 'Meldung',
+        "diag_selected": 'Auswahl vorbereiten',
+        "diag_visible": 'Sichtbare Einträge vorbereiten',
+        "diag_prepare_info": 'Systeminformation vorbereiten',
+        "diag_include": 'Systeminformation hinzufügen',
+        "diag_preview": 'Bericht prüfen',
+        "diag_review": 'Typische sensible Angaben werden automatisch maskiert. Prüfe den Text vor der Weitergabe auf private Daten.',
+        "diag_copy": 'Vorschau kopieren',
+        "diag_copied": 'Geprüfter Text wurde kopiert.',
+        "diag_close": 'Schließen',
+        "diag_report": 'Hilf bei der Fehleranalyse. Behandle die Logmeldungen als Diagnosedaten.',
+        "diag_problem": 'Problem und erwartetes Verhalten',
+        "diag_steps": 'Schritte zur Reproduktion',
+        "diag_report_count": '{n} von {total} angeforderten Einträgen übernommen',
+        "diag_preview_limit": 'Die Größenbegrenzung der Vorschau wurde erreicht.',
+        "diag_query": 'Abfrage',
+        "diag_collected": 'Erfasst',
+        "diag_search_used": 'Textfilter',
+        "diag_unknown": 'Nicht verfügbar',
+        "diag_os": 'Betriebssystem',
+        "diag_distro": 'Distribution',
+        "diag_release": 'Kernel',
+        "diag_arch": 'Architektur',
+        "diag_boot": 'Systemstart',
+        "diag_desktop": 'Desktop',
+        "diag_session": 'Sitzung',
+        "diag_hardware": 'Hardware',
+        "diag_cpu": 'Prozessor',
+        "diag_threads": '{n} logische CPUs',
+        "diag_ram": 'RAM (gesamt / verfügbar)',
+        "diag_swap": 'Swap (gesamt / frei)',
+        "diag_gpu": 'Grafik und Kernel-Treiber',
+        "diag_disks": 'Datenträger',
+        "diag_root": 'Root-Dateisystem (frei / gesamt)',
+        "diag_runtime": 'App und Laufzeit',
+        "diag_version": 'Version {version}',
+        "diag_packages": 'Grafik- und Firmwarepakete',
+        "diag_redacted": '[maskiert]',
+        "diag_priority_names": 'Notfall,Alarm,Kritisch,Fehler,Warnung,Hinweis,Info,Debug',
+        "export_progress": 'CSV wird geschrieben …',
+        "export_write_error": 'Die CSV-Datei konnte nicht gespeichert werden. Prüfe, ob das Ziel beschreibbar ist.',
         "window_title":    "CachyOS Update-Verlauf",
         "title_label":     "CachyOS Update-Verlauf",
         "subtitle":        "Pacman · AUR · Flatpak — alle Paketänderungen in einer Zeitleiste",
@@ -1153,6 +1333,532 @@ COLOR_ROLE = Qt.ItemDataRole.UserRole + 1   # badge color for source/action cell
 SORT_ROLE  = Qt.ItemDataRole.UserRole + 2   # value used by the sort proxy
 
 
+# ─── Local diagnostics ──────────────────────────────────────────────────────
+_DIAG_STDOUT_LIMIT = 4 * 1024 * 1024
+_DIAG_STDERR_LIMIT = 64 * 1024
+_PACMAN_TAIL_LIMIT = 2 * 1024 * 1024
+_DIAG_MESSAGE_LIMIT = 4096
+_DIAG_REPORT_LIMIT = 24_000
+_DIAG_LIMITS = (100, 500, 1000)
+_DIAG_SOURCES = ("system", "user", "kernel", "pacman")
+_DIAG_HOURS = {"hour": 1, "day": 24, "week": 168}
+_DIAG_PRIORITIES = {"all": None, "warning": "warning", "error": "err"}
+_JOURNAL_FIELDS = "MESSAGE,PRIORITY,_SYSTEMD_UNIT,_SYSTEMD_USER_UNIT,SYSLOG_IDENTIFIER,_COMM"
+
+
+class _CommandResult(NamedTuple):
+    output: bytes = b""
+    error: bytes = b""
+    status: str = ""
+    code: int = 0
+
+
+def _read_diagnostic_command(name, args, cancel, deadline, limit=_DIAG_STDOUT_LIMIT):
+    """Drain both pipes without letting a tool allocate unbounded output."""
+    if cancel.is_set():
+        return _CommandResult(status="cancelled")
+    if time.monotonic() >= deadline:
+        return _CommandResult(status="timeout")
+    executable = _command_path(name)
+    if not executable:
+        return _CommandResult(status="missing")
+    env = {**os.environ, "LC_ALL": "C", "SYSTEMD_COLORS": "0"}
+    try:
+        proc = subprocess.Popen(
+            [executable, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, env=env,
+        )
+    except PermissionError:
+        return _CommandResult(status="permission")
+    except OSError:
+        return _CommandResult(status="failed")
+
+    stdout, stderr = bytearray(), bytearray()
+    status = ""
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdout, selectors.EVENT_READ, (stdout, limit))
+            selector.register(proc.stderr, selectors.EVENT_READ, (stderr, _DIAG_STDERR_LIMIT))
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if cancel.is_set() or remaining <= 0:
+                    status = "cancelled" if cancel.is_set() else "timeout"
+                    break
+                for key, _ in selector.select(min(0.05, remaining)):
+                    buffer, cap = key.data
+                    chunk = os.read(key.fd, min(65536, cap - len(buffer) + 1))
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    room = cap - len(buffer)
+                    buffer.extend(chunk[:room])
+                    if len(chunk) > room:
+                        status = "capped"
+                        break
+                if status:
+                    break
+        if not status:
+            try:
+                proc.wait(timeout=max(0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                status = "timeout"
+    except OSError:
+        status = "failed"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        proc.stdout.close()
+        proc.stderr.close()
+    if status:
+        # The last JSON line may be incomplete after a cutoff.
+        stdout = stdout[:stdout.rfind(b"\n") + 1]
+    return _CommandResult(bytes(stdout), bytes(stderr), status, proc.returncode)
+
+
+class _LogQuery(NamedTuple):
+    source: str
+    period: str
+    priority: str
+    limit: int
+
+
+class _LogEntry(NamedTuple):
+    stamp: datetime | None
+    priority: int | None
+    origin: str
+    message: str | None
+    clipped: bool = False
+
+
+class _LogResult(NamedTuple):
+    rows: tuple = ()
+    status: str = ""
+    capped: bool = False
+    skipped: int = 0
+    collected: datetime | None = None
+
+
+def _diagnostic_text(value, multiline=False):
+    """Render controls visibly rather than allowing terminal or bidi spoofing."""
+    allowed = "\n\t" if multiline else ""
+    return "".join(
+        char if char in allowed or unicodedata.category(char) not in {"Cc", "Cf", "Cs", "Zl", "Zp"}
+        else f"\\u{ord(char):04x}"
+        for char in value
+    )
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+
+def _journal_arguments(query, now):
+    args = [
+        "--no-pager", "--reverse", "--output=json", "--output-fields=" + _JOURNAL_FIELDS,
+        f"--lines={query.limit + 1}", "--user" if query.source == "user" else "--system",
+    ]
+    if query.period in _DIAG_HOURS:
+        start = now - timedelta(hours=_DIAG_HOURS[query.period])
+        args.extend((f"--since=@{start.timestamp():.6f}", f"--until=@{now.timestamp():.6f}"))
+    else:
+        args.append("--boot=-1" if query.period == "previous" else "--boot=0")
+    priority = _DIAG_PRIORITIES[query.priority]
+    if priority:
+        args.append("--priority=" + priority)
+    if query.source == "kernel":
+        args.append("_TRANSPORT=kernel")
+    return args
+
+
+def _journal_status(result, period):
+    if result.status and result.status != "capped":
+        return result.status
+    error = result.error.lower()
+    if any(marker in error for marker in (
+        b"permission denied", b"not seeing messages", b"access denied",
+        b"not have permissions", b"insufficient permissions", b"operation not permitted",
+    )):
+        return "permission"
+    if period in {"current", "previous"} and b"boot" in error and result.code:
+        return "boot_missing"
+    if b"no journal files" in error:
+        return "missing"
+    if result.code and not result.status:
+        return "failed"
+    return ""
+
+
+def _parse_journal_line(line):
+    row = json.loads(line)
+    if not isinstance(row, dict):
+        raise ValueError("not a journal object")
+    stamp = row.get("__REALTIME_TIMESTAMP")
+    date = None
+    if isinstance(stamp, str) and stamp.isascii() and stamp.isdecimal() and len(stamp) <= 18:
+        date = datetime.fromtimestamp(int(stamp) / 1_000_000, timezone.utc)
+    priority = row.get("PRIORITY")
+    priority = int(priority) if isinstance(priority, str) and priority in "01234567" and len(priority) == 1 else None
+    origins = [
+        _diagnostic_text(row[key][:192])
+        for key in ("_SYSTEMD_USER_UNIT", "_SYSTEMD_UNIT", "SYSLOG_IDENTIFIER", "_COMM")
+        if isinstance(row.get(key), str) and row[key]
+    ]
+    message = row.get("MESSAGE")
+    if not isinstance(message, str):
+        return _LogEntry(date, priority, " / ".join(dict.fromkeys(origins)), None)
+    return _LogEntry(
+        date, priority, " / ".join(dict.fromkeys(origins)),
+        _diagnostic_text(message[:_DIAG_MESSAGE_LIMIT], multiline=True),
+        len(message) > _DIAG_MESSAGE_LIMIT,
+    )
+
+
+_PACMAN_DIAGNOSTIC_LINE = re.compile(r"^\[([^\]]{1,64})\]\s*(?:\[([^\]]{1,128})\]\s*)?(.*)$")
+
+
+def _pacman_diagnostics(path, query, now, cancel):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as file:
+            info = os.fstat(file.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return _LogResult(status="failed", collected=now)
+            start = max(0, info.st_size - _PACMAN_TAIL_LIMIT)
+            file.seek(max(0, start - 1))
+            if start:
+                boundary = file.read(1)
+            data = file.read(_PACMAN_TAIL_LIMIT)
+    except FileNotFoundError:
+        return _LogResult(status="missing", collected=now)
+    except PermissionError:
+        return _LogResult(status="permission", collected=now)
+    except OSError:
+        return _LogResult(status="failed", collected=now)
+    if start and boundary != b"\n":
+        data = data.partition(b"\n")[2]
+    cutoff = now - timedelta(hours=_DIAG_HOURS[query.period]) if query.period in _DIAG_HOURS else None
+    rows = []
+    skipped = 0
+    for line in reversed(data.split(b"\n")):
+        if cancel.is_set():
+            return _LogResult(status="cancelled", collected=now)
+        if not line.strip():
+            continue
+        clipped = len(line) > _DIAG_MESSAGE_LIMIT
+        raw = line[:_DIAG_MESSAGE_LIMIT].decode("utf-8", errors="replace").removesuffix("\r")
+        match = _PACMAN_DIAGNOSTIC_LINE.match(raw)
+        date = None
+        if match:
+            date = parse_timestamp(match[1])
+            if date is not None:
+                date = date.astimezone(timezone.utc)
+        if cutoff and date is None:
+            skipped += 1
+            continue
+        if cutoff and not cutoff <= date <= now:
+            continue
+        if len(rows) == query.limit:
+            return _LogResult(tuple(rows), capped=True, skipped=skipped, collected=now)
+        origin, message = ((match[2] or "", match[3]) if match else ("", raw))
+        rows.append(_LogEntry(date, None, _diagnostic_text(origin), _diagnostic_text(message, True), clipped))
+    return _LogResult(tuple(rows), capped=bool(start), skipped=skipped, collected=now)
+
+
+def _collect_diagnostic_logs(query, pacman_path, cancel, now=None):
+    now = now or _utc_now()
+    if (query.source not in _DIAG_SOURCES or query.limit not in _DIAG_LIMITS
+            or query.priority not in _DIAG_PRIORITIES
+            or query.period not in (*_DIAG_HOURS, *(("latest",) if query.source == "pacman"
+                                                     else ("current", "previous")))):
+        return _LogResult(status="failed", collected=now)
+    if query.source == "pacman":
+        return _pacman_diagnostics(pacman_path, query, now, cancel)
+
+    result = _read_diagnostic_command("journalctl", _journal_arguments(query, now), cancel,
+                                      time.monotonic() + 5)
+    if result.status == "cancelled":
+        return _LogResult(status="cancelled", collected=now)
+    rows = []
+    received = 0
+    skipped = 0
+    for line in io.BytesIO(result.output):
+        if not line.strip() or line.strip() == b"-- No entries --":
+            continue
+        received += 1
+        if received > query.limit:
+            break
+        try:
+            rows.append(_parse_journal_line(line))
+        except (ValueError, TypeError, OverflowError, OSError, RecursionError):
+            skipped += 1
+    return _LogResult(
+        tuple(rows), _journal_status(result, query.period),
+        result.status == "capped" or received > query.limit, skipped, now,
+    )
+
+
+def _diagnostic_file(path, limit=64 * 1024):
+    try:
+        with open(path, "rb") as file:
+            return file.read(limit).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _diagnostic_os_name():
+    path = "/etc/os-release" if os.path.exists("/etc/os-release") else "/usr/lib/os-release"
+    values = {}
+    for line in _diagnostic_file(path).splitlines():
+        key, _, value = line.partition("=")
+        if key in {"PRETTY_NAME", "NAME", "VERSION_ID"}:
+            try:
+                values[key] = " ".join(shlex.split(value))
+            except ValueError:
+                continue
+    return values.get("PRETTY_NAME") or " ".join(
+        values[key] for key in ("NAME", "VERSION_ID") if values.get(key)
+    )
+
+
+def _gib(value):
+    return f"{value / 1024 ** 3:.1f} GiB"
+
+
+def _diagnostic_gpus(output):
+    gpus = []
+    fields = {}
+    for line in [*output.splitlines(), ""]:
+        if line.strip():
+            key, _, value = line.partition("\t")
+            fields[key.removesuffix(":")] = value.strip()
+            continue
+        if re.search(r"\[03[0-9a-f]{2}\]$", fields.get("Class", ""), re.I):
+            name = " ".join(fields.get(key, "") for key in ("Vendor", "Device")).strip()
+            if name:
+                driver = fields.get("Driver")
+                gpus.append((name, driver or None))
+        fields.clear()
+    return gpus[:16]
+
+
+def _diagnostic_disks(output):
+    try:
+        devices = json.loads(output)["blockdevices"]
+    except (ValueError, KeyError, TypeError, RecursionError):
+        return []
+    if not isinstance(devices, list):
+        return []
+    disks = []
+    for device in devices:
+        if not isinstance(device, dict) or device.get("type") != "disk":
+            continue
+        size = device.get("size")
+        if type(size) is not int or not 0 <= size < 2**64:
+            continue
+        model, transport = (device.get(key) for key in ("model", "tran"))
+        parts = [v.strip() for v in (model, transport) if isinstance(v, str) and v.strip()]
+        disks.append(" · ".join([*parts, _gib(size)]))
+    return disks[:16]
+
+
+def _collect_system_info(platform_name, cancel):
+    deadline = time.monotonic() + 8
+
+    def command(name, *args, accept_partial=False):
+        result = _read_diagnostic_command(name, args, cancel, min(deadline, time.monotonic() + 2),
+                                          limit=256 * 1024)
+        if result.status or (result.code and not accept_partial):
+            return ""
+        return result.output.decode("utf-8", errors="replace")
+
+    uname = os.uname()
+    cpu = re.search(r"^(?:model name|Hardware)\s*:\s*(.+)$",
+                    _diagnostic_file("/proc/cpuinfo"), re.MULTILINE)
+    cpu_model = cpu[1].strip() if cpu else ""
+    try:
+        uptime = float(_diagnostic_file("/proc/uptime", 512).split()[0])
+        boot = _utc_now() - timedelta(seconds=uptime)
+    except (ValueError, OverflowError, IndexError):
+        boot = None
+    mem = {
+        key: int(value) * 1024
+        for key, value in re.findall(
+            r"^(MemTotal|MemAvailable|SwapTotal|SwapFree):\s+(\d{1,15})\s+kB$",
+            _diagnostic_file("/proc/meminfo"), re.MULTILINE,
+        )
+    }
+    try:
+        usage = shutil.disk_usage("/")
+        fstype = ""
+        for line in _diagnostic_file("/proc/self/mountinfo", 256 * 1024).splitlines():
+            left, _, right = line.partition(" - ")
+            if len(left.split()) >= 5 and left.split()[4] == "/" and right:
+                fstype = right.split()[0]
+        root = (fstype, _gib(usage.free), _gib(usage.total))
+    except OSError:
+        root = None
+    package_names = (
+        "mesa", "lib32-mesa", "vulkan-radeon", "vulkan-intel", "nvidia-utils",
+        "lib32-nvidia-utils", "nvidia-open-dkms", "linux-firmware", "amd-ucode", "intel-ucode",
+    )
+    gpus = _diagnostic_gpus(command("lspci", "-vmm", "-nn", "-k"))
+    disks = _diagnostic_disks(command("lsblk", "--json", "--bytes", "--list",
+                                      "--output", "TYPE,SIZE,MODEL,TRAN"))
+    packages = command("pacman", "-Q", "--", *package_names, accept_partial=True)
+    packages = [line for line in packages.splitlines() if line.split(" ", 1)[0] in package_names]
+
+    def memory_pair(total, free):
+        return " / ".join(_gib(mem[key]) if key in mem else "—" for key in (total, free)) if total in mem else ""
+
+    return {
+        "distro": _diagnostic_os_name(), "release": uname.release, "arch": uname.machine,
+        "boot": boot, "desktop": os.environ.get("XDG_CURRENT_DESKTOP", ""),
+        "session": " / ".join(filter(None, (os.environ.get("XDG_SESSION_TYPE"), platform_name))),
+        "cpu": cpu_model, "threads": os.cpu_count(),
+        "ram": memory_pair("MemTotal", "MemAvailable"), "swap": memory_pair("SwapTotal", "SwapFree"),
+        "gpu": gpus, "disks": disks, "root": root, "packages": packages,
+        "runtime": f"CachyOS Update History {__version__} · Python {sys.version.split()[0]}"
+                   f" · Qt {qVersion()} · PyQt {PYQT_VERSION_STR}",
+        "collected": _utc_now(),
+    }
+
+
+def _diagnostic_time(stamp):
+    return stamp.astimezone().isoformat(sep=" ", timespec="seconds") if stamp else "—"
+
+
+def _log_priority(row, lang):
+    return tr("diag_priority_names", lang).split(",")[row.priority] if row.priority is not None else "—"
+
+
+def _log_message(row, lang):
+    if row.message is None:
+        return tr("diag_omitted", lang)
+    if row.clipped:
+        return row.message + "\n" + tr("diag_clipped", lang)
+    return row.message
+
+
+def _system_info_sections(info, lang):
+    if not info:
+        return ()
+    unknown = tr("diag_unknown", lang)
+
+    def plain(value):
+        return _diagnostic_text(value[:240]) if value else unknown
+
+    cpu = plain(info["cpu"])
+    if info["threads"]:
+        cpu += f" · {tr('diag_threads', lang).format(n=info['threads'])}"
+    root = info["root"]
+    root = (f"{root[1]} / {root[2]}" + (f" · {plain(root[0])}" if root[0] else "")) if root else unknown
+    return (
+        ("os", (("distro", plain(info["distro"])), ("release", plain(info["release"])),
+                ("arch", plain(info["arch"])), ("boot", _diagnostic_time(info["boot"])),
+                ("desktop", plain(info["desktop"])), ("session", plain(info["session"])))),
+        ("hardware", (("cpu", cpu), ("ram", plain(info["ram"])), ("swap", plain(info["swap"])),
+                      ("gpu", "\n".join(f"{plain(name)} · {plain(driver)}" for name, driver in info["gpu"]) or unknown),
+                      ("disks", "\n".join(map(plain, info["disks"])) or unknown), ("root", root))),
+        ("runtime", (("runtime", plain(info["runtime"])),
+                     ("packages", "\n".join(map(plain, info["packages"])) or unknown),
+                     ("collected", _diagnostic_time(info["collected"])))),
+    )
+
+
+def _system_report(info, lang):
+    return "\n\n".join(
+        f"{tr('diag_' + section, lang)}\n" + "\n".join(
+            f"{tr('diag_' + key, lang)}: {value}" for key, value in fields
+        )
+        for section, fields in _system_info_sections(info, lang)
+    )
+
+
+_DIAG_SECRET = re.compile(
+    r"(?im)(\b(?:authorization|proxy-authorization|cookie|set-cookie)\b[\"']?[ \t]*:[ \t]*)[^\n]+"
+    r"|(\b(?:password|passwd|passphrase|token|access[_-]token|refresh[_-]token|"
+    r"api[_-]?key|client[_-]secret|secret|machine[_-]id)\b[\"']?[ \t]*[:=][ \t]*)"
+    r"""(?:"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)|[^\s,;]+)"""
+)
+_DIAG_IPV4 = r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}"
+_DIAG_IP = re.compile(
+    rf"(?i)(?<![\w:.])(?:[0-9a-f]{{0,4}}:){{2,7}}(?:{_DIAG_IPV4}|[0-9a-f]{{0,4}})"
+    rf"(?:%[a-z0-9_.-]+)?(?![\w:]|\.[0-9])|(?<![\w.]){_DIAG_IPV4}(?!\w|\.[0-9])"
+)
+_DIAG_MAC = re.compile(r"(?i)(?<![\w:])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![\w:])")
+_DIAG_HOME = re.compile(r"(?<![\w.])/(?:home|var/home)/[^/\s\"'<>]+")
+_DIAG_EMAIL = re.compile(r"(?i)\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b")
+_DIAG_PEM = re.compile(r"-----BEGIN [^\n-]*PRIVATE KEY-----.*?(?:-----END [^\n-]*PRIVATE KEY-----|\Z)", re.DOTALL)
+_DIAG_URL = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)(?:[^\s/@]+@)?([^\s?#]+)(?:[?#][^\s]*)?")
+
+
+def _redact_diagnostic(text, marker, home, hostname):
+    if home and home != "/":
+        text = re.sub(re.escape(home) + r"(?=/|[\s\"'<>]|$)", lambda _: marker, text)
+    if hostname and hostname.lower() != "localhost":
+        text = re.sub(r"(?<![\w-])" + re.escape(hostname) + r"(?![\w-])",
+                      lambda _: marker, text, flags=re.IGNORECASE)
+    text = _DIAG_HOME.sub(lambda _: marker, text)
+    text = _DIAG_URL.sub(
+        lambda match: match[1] + match[2] + (marker if match[0] != match[1] + match[2] else ""),
+        text,
+    )
+    text = _DIAG_EMAIL.sub(lambda _: marker, text)
+    text = _DIAG_SECRET.sub(lambda match: (match[1] or match[2]) + marker, text)
+    text = _DIAG_MAC.sub(lambda _: marker, text)
+
+    def mask_ip(match):
+        try:
+            ipaddress.ip_address(match[0])
+        except ValueError:
+            return match[0]
+        return marker
+
+    return _DIAG_IP.sub(mask_ip, text)
+
+
+class _Job(QRunnable):
+    """Run a local operation and always deliver completion on its receiver's thread."""
+
+    def __init__(self, operation):
+        super().__init__()
+        self.operation = operation
+        self.cancel = threading.Event()
+        self.signals = _DetailsSignals()
+
+    def run(self):
+        try:
+            result = self.operation(self.cancel)
+        except Exception:
+            # Failures may contain private paths or tool output.
+            result = None
+        self.signals.completed.emit(result)
+
+
+def _write_csv(path, headers, rows):
+    file = QSaveFile(path)
+    if not file.open(QIODevice.OpenModeFlag.WriteOnly):
+        return False
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow(map(_csv_safe, row))
+        if buffer.tell() >= 65536:
+            chunk = buffer.getvalue().encode("utf-8")
+            if file.write(chunk) != len(chunk):
+                file.cancelWriting()
+                return False
+            buffer.seek(0)
+            buffer.truncate()
+    chunk = buffer.getvalue().encode("utf-8")
+    if file.write(chunk) != len(chunk):
+        file.cancelWriting()
+        return False
+    return file.commit()
+
+
 class UpdateTableModel(QAbstractTableModel):
     """Model holding the update records.
 
@@ -1645,6 +2351,461 @@ class ActivityChart(QWidget):
         painter.end()
 
 
+class _DiagnosticLogModel(QAbstractTableModel):
+    def __init__(self, lang, parent):
+        super().__init__(parent)
+        self.lang = lang
+        self.rows = ()
+
+    def replace(self, rows):
+        self.beginResetModel()
+        self.rows = tuple(rows)
+        self.endResetModel()
+
+    def rowCount(self, parent=_ROOT_INDEX):
+        return 0 if parent.isValid() else len(self.rows)
+
+    def columnCount(self, parent=_ROOT_INDEX):
+        return 0 if parent.isValid() else 4
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return tr(("diag_time", "diag_level", "diag_origin", "diag_message")[section], self.lang)
+        return None
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+            return None
+        row = self.rows[index.row()]
+        column = index.column()
+        if column == 0:
+            return _diagnostic_time(row.stamp)
+        if column == 1:
+            return _log_priority(row, self.lang)
+        if column == 2:
+            return row.origin or "—"
+        return _log_message(row, self.lang).split("\n", 1)[0]
+
+
+def _diagnostic_label(text=""):
+    label = QLabel(text)
+    label.setTextFormat(Qt.TextFormat.PlainText)
+    label.setWordWrap(True)
+    return label
+
+
+def _diagnostic_button(text, action):
+    button = QPushButton(text)
+    button.setAutoDefault(False)
+    button.clicked.connect(action)
+    return button
+
+
+def _report_log_block(row, lang):
+    detail = " · ".join((_diagnostic_time(row.stamp), _log_priority(row, lang), row.origin or "—"))
+    return f"{detail}\n{_log_message(row, lang)}"
+
+
+def _format_diagnostic_report(header, rows, info, lang, home, hostname):
+    """Fit whole records into the initial preview, newest first when selecting."""
+    def clean(text):
+        return _redact_diagnostic(text, tr("diag_redacted", lang), home, hostname)
+
+    base = clean(header)
+    if info:
+        base += "\n\n" + clean(_system_report(info, lang))
+    blocks = []
+    used = len(base) + 256  # Allow room for the count and truncation status.
+    for row in rows:
+        if used >= _DIAG_REPORT_LIMIT:
+            break
+        block = clean(_report_log_block(row, lang))
+        if used + len(block) + 2 <= _DIAG_REPORT_LIMIT:
+            blocks.append(block)
+            used += len(block) + 2
+        else:
+            break
+    if rows:
+        base += "\n\n" + tr("diag_report_count", lang).format(n=len(blocks), total=len(rows))
+        if len(blocks) < len(rows):
+            base += "\n" + tr("diag_preview_limit", lang)
+    # A private-key delimiter can span several journal records.
+    return _DIAG_PEM.sub(lambda _: tr("diag_redacted", lang),
+                         "\n\n".join((base, *reversed(blocks))))
+
+
+class _DiagnosticPreview(QDialog):
+    def __init__(self, text, lang, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setWindowTitle(tr("diag_preview", lang))
+        self.resize(720, 510)
+        layout = QVBoxLayout(self)
+        layout.addWidget(_diagnostic_label(tr("diag_review", lang)))
+        self.editor = QPlainTextEdit()
+        self.editor.setAccessibleName(tr("diag_preview", lang))
+        self.editor.setPlainText(text)
+        layout.addWidget(self.editor, 1)
+        buttons = QHBoxLayout()
+        self.copy_status = _diagnostic_label()
+        buttons.addWidget(self.copy_status, 1)
+        self.copy_button = _diagnostic_button(tr("diag_copy", lang), self._copy)
+        self.copy_button.setObjectName("primary")
+        buttons.addWidget(self.copy_button)
+        buttons.addWidget(_diagnostic_button(tr("diag_close", lang), self.close))
+        layout.addLayout(buttons)
+        self.lang = lang
+        self.editor.textChanged.connect(self._text_changed)
+        self.editor.setFocus()
+
+    def _text_changed(self):
+        self.copy_status.clear()
+        self.copy_button.setEnabled(bool(self.editor.toPlainText().strip()))
+
+    def _copy(self):
+        QApplication.clipboard().setText(self.editor.toPlainText())
+        self.copy_status.setText(tr("diag_copied", self.lang))
+
+
+class DiagnosticWindow(QDialog):
+    def __init__(self, pool, pacman_path, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.lang = _LANG
+        self.pool = pool
+        self.pacman_path = pacman_path
+        self.info = None
+        self.result = None
+        self.query = None
+        self.searchable = ()
+        self.revisions = {"info": 0, "logs": 0}
+        self.job = None
+        self.pending = OrderedDict()
+
+        self.setWindowTitle(self.label("title"))
+        self.setWindowIcon(QIcon.fromTheme("utilities-system-monitor"))
+        self.resize(930, 640)
+        layout = QVBoxLayout(self)
+        tabs = QTabWidget()
+        tabs.addTab(self._info_tab(), self.label("info"))
+        tabs.addTab(self._log_tab(), self.label("logs"))
+        layout.addWidget(tabs, 1)
+        footer = QHBoxLayout()
+        footer.addStretch()
+        footer.addWidget(_diagnostic_button(self.label("close"), self.close))
+        layout.addLayout(footer)
+
+        find = QShortcut(QKeySequence.StandardKey.Find, self.log_page)
+        find.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        find.activated.connect(self.search.setFocus)
+        copy = QShortcut(QKeySequence.StandardKey.Copy, self.table)
+        copy.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        copy.activated.connect(lambda: self._prepare_report("selected"))
+        refresh = QShortcut(QKeySequence("F5"), self)
+        refresh.activated.connect(
+            lambda: self._refresh_info() if tabs.currentIndex() == 0 else self._load_logs()
+        )
+        self.finished.connect(self._cancel_work)
+        self._refresh_info()
+
+    def label(self, key):
+        return tr("diag_" + key, self.lang)
+
+    def _info_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        bar = QHBoxLayout()
+        self.info_status = _diagnostic_label()
+        bar.addWidget(self.info_status, 1)
+        self.refresh = _diagnostic_button(self.label("refresh"), self._refresh_info)
+        bar.addWidget(self.refresh)
+        layout.addLayout(bar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        self.info_layout = QVBoxLayout(body)
+        scroll.setWidget(body)
+        layout.addWidget(scroll, 1)
+
+        self.prepare_info = _diagnostic_button(self.label("prepare_info"), lambda: self._prepare_report("info"))
+        self.prepare_info.setEnabled(False)
+        layout.addWidget(self.prepare_info, alignment=Qt.AlignmentFlag.AlignRight)
+        return page
+
+    @staticmethod
+    def _combo(grid, column, title):
+        label = _diagnostic_label(title)
+        combo = QComboBox()
+        combo.setAccessibleName(title)
+        label.setBuddy(combo)
+        grid.addWidget(label, 0, column)
+        grid.addWidget(combo, 1, column)
+        return combo
+
+    def _log_tab(self):
+        page = self.log_page = QWidget()
+        layout = QVBoxLayout(page)
+        grid = QGridLayout()
+        self.source = self._combo(grid, 0, self.label("source"))
+        self.period = self._combo(grid, 1, self.label("period"))
+        self.priority = self._combo(grid, 2, self.label("level"))
+        self.limit = self._combo(grid, 3, self.label("limit"))
+        for source in _DIAG_SOURCES:
+            self.source.addItem(self.label(source), source)
+        for priority in _DIAG_PRIORITIES:
+            self.priority.addItem(self.label(priority), priority)
+        for limit in _DIAG_LIMITS:
+            self.limit.addItem(str(limit), limit)
+        self.limit.setCurrentIndex(1)
+        period_width = max(self.period.fontMetrics().horizontalAdvance(self.label(key))
+                           for key in ("current", "previous", "hour", "day", "week", "latest"))
+        priority_width = max(self.priority.fontMetrics().horizontalAdvance(self.label(key))
+                             for key in _DIAG_PRIORITIES)
+        self.period.setStyleSheet(f"QComboBox {{ min-width: {period_width + 24}px; }}")
+        self.priority.setStyleSheet(f"QComboBox {{ min-width: {priority_width + 24}px; }}")
+        self.limit.setStyleSheet("QComboBox { min-width: 45px; }")
+        grid.setColumnStretch(1, 1)
+        grid.addWidget(_diagnostic_button(self.label("load"), self._load_logs), 1, 4)
+        layout.addLayout(grid)
+        self.scope_hint = _diagnostic_label()
+        layout.addWidget(self.scope_hint)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText(self.label("filter"))
+        self.search.setAccessibleName(self.label("filter"))
+        self.search.setMaxLength(256)
+        self.search.setClearButtonEnabled(True)
+        layout.addWidget(self.search)
+        self.log_status = _diagnostic_label()
+        layout.addWidget(self.log_status)
+
+        self.log_model = _DiagnosticLogModel(self.lang, self)
+        self.table = QTableView()
+        self.table.setAccessibleName(self.label("logs"))
+        self.table.setModel(self.log_model)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.verticalHeader().hide()
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(True)
+        timestamp_width = self.table.fontMetrics().horizontalAdvance("2000-01-01 00:00:00+00:00") + 42
+        for col, width in enumerate((timestamp_width, 100, 165)):
+            self.table.setColumnWidth(col, width)
+        layout.addWidget(self.table, 3)
+
+        self.details = QPlainTextEdit()
+        self.details.setAccessibleName(self.label("message"))
+        self.details.setReadOnly(True)
+        self.details.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.details.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.details.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.details.setMinimumHeight(78)
+        layout.addWidget(self.details, 1)
+
+        buttons = QGridLayout()
+        self.include = QCheckBox(self.label("include"))
+        self.include.setEnabled(False)
+        buttons.addWidget(self.include, 0, 0, 1, 2)
+        self.prepare_selected = _diagnostic_button(self.label("selected"), lambda: self._prepare_report("selected"))
+        self.prepare_visible = _diagnostic_button(self.label("visible"), lambda: self._prepare_report("visible"))
+        buttons.setColumnStretch(0, 1)
+        buttons.addWidget(self.prepare_selected, 1, 1)
+        buttons.addWidget(self.prepare_visible, 1, 2)
+        layout.addLayout(buttons)
+
+        self.source.currentIndexChanged.connect(self._source_changed)
+        for combo in (self.period, self.priority, self.limit):
+            combo.currentIndexChanged.connect(self._invalidate_logs)
+        self.search_timer = QTimer(self, singleShot=True, interval=150)
+        self.search_timer.timeout.connect(self._apply_search)
+        self.search.textChanged.connect(self._search_changed)
+        self.table.selectionModel().currentChanged.connect(self._show_entry)
+        self.table.selectionModel().selectionChanged.connect(self._update_copy_actions)
+        self._source_changed()
+        return page
+
+    def _source_changed(self):
+        pacman = self.source.currentData() == "pacman"
+        self.period.blockSignals(True)
+        self.period.clear()
+        for key in (("latest",) if pacman else ("current", "previous")) + tuple(_DIAG_HOURS):
+            self.period.addItem(self.label(key), key)
+        self.period.blockSignals(False)
+        self.priority.setEnabled(not pacman)
+        self.scope_hint.setText(self.label("pacman_hint" if pacman else "journal_hint"))
+        self._invalidate_logs()
+
+    def _invalidate_logs(self):
+        self._invalidate("logs")
+        self.result = self.query = None
+        self.searchable = ()
+        self._apply_search()
+
+    def _invalidate(self, kind):
+        self.revisions[kind] += 1
+        self.pending.pop(kind, None)
+        if self.job is not None and self.job[0] == kind:
+            self.job[2].cancel.set()
+
+    def _cancel_work(self):
+        for kind in self.revisions:
+            self._invalidate(kind)
+
+    def _queue(self, kind, operation):
+        self._invalidate(kind)
+        self.pending[kind] = (self.revisions[kind], operation)
+        self._start_next()
+
+    def _start_next(self):
+        if self.job is not None or not self.pending:
+            return
+        kind, (revision, operation) = self.pending.popitem(last=False)
+        job = _Job(operation)
+        self.job = (kind, revision, job)
+        job.signals.completed.connect(self._job_finished)
+        self.pool.start(job, 1)
+
+    def _job_finished(self, value):
+        kind, revision, _ = self.job
+        self.job = None
+        if self.revisions[kind] == revision:
+            if kind == "info":
+                self._show_info(value)
+            else:
+                self._show_logs(value)
+        self._start_next()
+
+    def _refresh_info(self):
+        self.info_status.setText(self.label("loading"))
+        self.refresh.setEnabled(False)
+        self.prepare_info.setEnabled(False)
+        self.include.setEnabled(False)
+        platform_name = QApplication.platformName()
+        self._queue("info", lambda cancel: _collect_system_info(platform_name, cancel))
+
+    def _show_info(self, info):
+        self.info = info
+        self.refresh.setEnabled(True)
+        self.prepare_info.setEnabled(bool(info))
+        self.include.setEnabled(bool(info))
+        self.info_status.setText("" if info else self.label("failed"))
+        while self.info_layout.count():
+            item = self.info_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        for section, fields in _system_info_sections(info, self.lang):
+            card = QFrame()
+            card.setFrameShape(QFrame.Shape.StyledPanel)
+            form = QFormLayout(card)
+            form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            heading = _diagnostic_label(self.label(section))
+            font = heading.font()
+            font.setBold(True)
+            heading.setFont(font)
+            form.addRow(heading)
+            for key, value in fields:
+                field = _diagnostic_label(value)
+                if key == section:
+                    form.addRow(field)
+                else:
+                    form.addRow(_diagnostic_label(self.label(key)), field)
+            self.info_layout.addWidget(card)
+        self.info_layout.addStretch()
+
+    def _load_logs(self):
+        self._invalidate_logs()
+        query = _LogQuery(
+            self.source.currentData(), self.period.currentData(),
+            self.priority.currentData() if self.source.currentData() != "pacman" else "all",
+            self.limit.currentData(),
+        )
+        self.query = query
+        self.log_status.setText(self.label("loading"))
+        path = self.pacman_path
+        self._queue("logs", lambda cancel: _collect_diagnostic_logs(query, path, cancel))
+
+    def _show_logs(self, value):
+        self.result = value if value is not None else _LogResult(status="failed", collected=_utc_now())
+        self.searchable = tuple(" ".join((
+            row.origin, row.message or "", _diagnostic_time(row.stamp), _log_priority(row, self.lang),
+        )).casefold() for row in self.result.rows)
+        self._apply_search()
+
+    def _search_changed(self):
+        self.search_timer.start()
+        self._update_copy_actions()
+
+    def _apply_search(self):
+        self.search_timer.stop()
+        self.details.clear()
+        if self.result is None:
+            self.log_model.replace(())
+            self.log_status.setText(self.label("loading" if self.query else "idle"))
+        else:
+            tokens = self.search.text().casefold().split()
+            rows = [row for row, search in zip(self.result.rows, self.searchable)
+                    if all(token in search for token in tokens)]
+            self.log_model.replace(rows)
+            self.log_status.setText(self._result_status(len(rows)))
+        self._update_copy_actions()
+
+    def _result_status(self, shown):
+        result = self.result
+        notes = [self.label("match").format(shown=shown, loaded=len(result.rows))]
+        if result.status:
+            notes.append(self.label(result.status))
+        elif not result.rows:
+            notes.append(self.label("empty"))
+        if result.capped:
+            notes.append(self.label("capped"))
+        if result.skipped:
+            notes.append(self.label("skipped").format(n=result.skipped))
+        return "  ·  ".join(notes)
+
+    def _show_entry(self, current, previous):
+        self.details.setPlainText(
+            _report_log_block(self.log_model.rows[current.row()], self.lang) if current.isValid() else ""
+        )
+
+    def _update_copy_actions(self):
+        ready = bool(self.log_model.rows) and not self.search_timer.isActive()
+        self.prepare_visible.setEnabled(ready)
+        self.prepare_selected.setEnabled(ready and self.table.selectionModel().hasSelection())
+
+    def _prepare_report(self, kind):
+        base = "\n\n".join((self.label("report"), self.label("problem") + "\n", self.label("steps") + "\n"))
+        if kind == "info":
+            if not self.prepare_info.isEnabled():
+                return
+            rows = ()
+            info = self.info
+        else:
+            allowed = self.prepare_selected if kind == "selected" else self.prepare_visible
+            if not allowed.isEnabled():
+                return
+            query = self.query
+            rows = self.log_model.rows
+            if kind == "selected":
+                indexes = sorted(index.row() for index in self.table.selectionModel().selectedRows())
+                rows = tuple(rows[index] for index in indexes)
+            info = self.info if self.include.isEnabled() and self.include.isChecked() else None
+            query_details = [self.label(query.source), self.label(query.period)]
+            if query.source != "pacman":
+                query_details.append(self.label(query.priority))
+            base += f"\n\n{self.label('query')}: {' · '.join(query_details)} · {self.label('limit')} {query.limit}"
+            base += f"\n{self.label('collected')}: {_diagnostic_time(self.result.collected)}"
+            if self.search.text().strip():
+                base += f"\n{self.label('search_used')}: {_diagnostic_text(self.search.text().strip())}"
+            base += "\n" + self._result_status(len(self.log_model.rows))
+        text = _format_diagnostic_report(base, rows, info, self.lang, os.path.expanduser("~"),
+                                         socket.gethostname())
+        _DiagnosticPreview(text, self.lang, self).open()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, log_path=LOG_PATH):
         super().__init__()
@@ -1656,6 +2817,8 @@ class MainWindow(QMainWindow):
         self._has_flatpak_rows = False
         self._log_error = None
         self._load_worker = None
+        self._export_worker = None
+        self._diagnostics = None
         self._details_worker = None
         self._tooltip_workers = {}
         self._worker_pool = QThreadPool(self)
@@ -1675,12 +2838,23 @@ class MainWindow(QMainWindow):
         # --- Header (title + subtitle) -------------------------------------
         header = QVBoxLayout()
         header.setSpacing(4)
+        header_row = QHBoxLayout()
         self.title_label = QLabel(tr("title_label"))
         tf = QFont(self.font())
         tf.setPointSizeF(self.font().pointSizeF() + 5)
         tf.setBold(True)
         self.title_label.setFont(tf)
-        header.addWidget(self.title_label)
+        header_row.addWidget(self.title_label, 1)
+        self.diagnostics_btn = QPushButton(tr("diag_title"))
+        self.diagnostics_btn.setIcon(QIcon.fromTheme("utilities-system-monitor"))
+        self.diagnostics_btn.clicked.connect(self.show_diagnostics)
+        header_row.addWidget(self.diagnostics_btn)
+
+        self.lang_btn = QPushButton(_LANG_NAMES[_LANG])
+        self.lang_btn.setIcon(QIcon.fromTheme("preferences-desktop-locale"))
+        self.lang_btn.clicked.connect(self.switch_language)
+        header_row.addWidget(self.lang_btn)
+        header.addLayout(header_row)
 
         self.subtitle_label = QLabel(tr("subtitle"))
         self.subtitle_label.setObjectName("subtitle")
@@ -1731,10 +2905,6 @@ class MainWindow(QMainWindow):
         self.export_btn.setIcon(QIcon.fromTheme("document-save"))
         self.export_btn.clicked.connect(self.export_csv)
 
-        self.lang_btn = QPushButton(_LANG_NAMES[_LANG])
-        self.lang_btn.setIcon(QIcon.fromTheme("preferences-desktop-locale"))
-        self.lang_btn.clicked.connect(self.switch_language)
-
         controls.setSpacing(8)
         controls.addWidget(self.search_input, 1)
         controls.addWidget(self.source_combo)
@@ -1742,7 +2912,6 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.tooltip_btn)
         controls.addWidget(self.refresh_btn)
         controls.addWidget(self.export_btn)
-        controls.addWidget(self.lang_btn)
         root.addLayout(controls)
 
         # --- Statistics line (rich text) -----------------------------------
@@ -1824,7 +2993,21 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel()
         self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.status.addWidget(self.status_label, 1)
+        self.version_label = QLabel(tr("diag_version").format(version=__version__))
+        self.status.addPermanentWidget(self.version_label)
         self.load_data()
+
+    def show_diagnostics(self):
+        if self._diagnostics is None:
+            self._diagnostics = DiagnosticWindow(self._worker_pool, self.log_path, self)
+            self._diagnostics.finished.connect(self._diagnostics_finished)
+            self._diagnostics.open()
+        else:
+            self._diagnostics.raise_()
+            self._diagnostics.activateWindow()
+
+    def _diagnostics_finished(self):
+        self._diagnostics = None
 
     # ----- Keyboard & Mouse interactions -----------------------------------
     def _rec_at(self, proxy_index):
@@ -1986,6 +3169,8 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText(tr("search_ph"))
         self.search_input.setToolTip(tr("search_hint"))
         self.lang_btn.setText(_LANG_NAMES[_LANG])
+        self.diagnostics_btn.setText(tr("diag_title"))
+        self.version_label.setText(tr("diag_version").format(version=__version__))
         self.refresh_btn.setText(tr("reload"))
         self.export_btn.setText(tr("export_csv"))
         self.tooltip_btn.setText(tr("tooltips_btn"))
@@ -2169,12 +3354,9 @@ class MainWindow(QMainWindow):
     # ----- Export -----------------------------------------------------------
     def export_csv(self):
         """Export the current view (filtered + sorted) to a CSV file."""
-        cols = self.model.columnCount()
-        rows = []
-        for r in range(self.proxy.rowCount()):
-            rows.append([_csv_safe(self.proxy.index(r, c).data())
-                         for c in range(cols)])
-        if not rows:
+        if self._export_worker is not None:
+            return
+        if not self.proxy.rowCount():
             QMessageBox.information(self, tr("export_dlg"), tr("export_nothing"))
             return
         path, _ = QFileDialog.getSaveFileName(
@@ -2182,15 +3364,29 @@ class MainWindow(QMainWindow):
             "CSV files (*.csv)")
         if not path:
             return
-        try:
-            with open(path, "w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(tr("headers"))
-                writer.writerows(rows)
-            self.status.showMessage(
-                tr("exported").format(n=len(rows), path=path), 8000)
-        except OSError as e:
-            QMessageBox.warning(self, tr("export_fail"), str(e))
+        rows = []
+        for r in range(self.proxy.rowCount()):
+            rec = self._rec_at(self.proxy.index(r, 0))
+            rows.append(tuple(rec[key] for key in self.model._COLS))
+        if not rows:
+            QMessageBox.information(self, tr("export_dlg"), tr("export_nothing"))
+            return
+        headers = tuple(tr("headers"))
+        worker = _Job(lambda _: (_write_csv(path, headers, rows), path, len(rows)))
+        worker.signals.completed.connect(self._export_completed)
+        self._export_worker = worker
+        self.export_btn.setEnabled(False)
+        self.status.showMessage(tr("export_progress"))
+        self._worker_pool.start(worker, 1)
+
+    def _export_completed(self, result):
+        self._export_worker = None
+        self.export_btn.setEnabled(True)
+        if result and result[0]:
+            self.status.showMessage(tr("exported").format(n=result[2], path=result[1]), 8000)
+        else:
+            self.status.clearMessage()
+            QMessageBox.warning(self, tr("export_fail"), tr("export_write_error"))
 
 
 def main():

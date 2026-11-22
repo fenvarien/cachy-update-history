@@ -71,6 +71,7 @@ workers.
 | `PackageDetailsDialog` | Detailed package view with clickable URLs and clipboard export. |
 | `ActivityChart` | Draw, hit-test and interactive filtering for the per-day chart with `QPainter`. |
 | `MainWindow` | Own UI state, workers, translation, enrichment, aggregates and export. |
+| `DiagnosticWindow` | Load system snapshots and log views on demand and prepare reviewed plaintext reports. |
 
 ## Data collection and normalization
 
@@ -152,6 +153,26 @@ not access Qt widgets or change global language state.
 Tooltip keys contain source, package and language. A language change can safely
 leave an old-language worker running because its result cannot match the current
 hover key.
+
+The diagnostics window uses the shared pool, with one in-flight operation and
+only the latest pending request per page. Request revisions and cancellation
+prevent obsolete data from reaching the view. A CSV export snapshots the
+filtered, sorted display on the GUI thread and writes it from a worker using
+`QSaveFile`.
+
+## Diagnostic data
+
+The inventory reads bounded Linux system files and selected fields from
+`lspci`, `lsblk` and local Pacman queries. The log reader consumes selected
+journal JSON fields from `journalctl` with a deadline, a 4 MiB stdout cap
+and a 64 KiB stderr cap. It uses a fixed scope, range and severity and a
+record limit. Pacman reads a bounded 2 MiB tail of the current regular file
+and applies time filtering locally. The source status and truncation flags
+are independent of the availability of individual records.
+
+Widgets receive typed log rows and inventory values. Filtering and report
+composition use the loaded snapshot. Reports have an editable plaintext
+preview, with initial redaction and a 24,000-character budget.
 
 ## Security boundaries
 

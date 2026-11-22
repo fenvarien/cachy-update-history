@@ -4,8 +4,10 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -361,6 +363,186 @@ class DataAndPerformanceTests(unittest.TestCase):
         )
         self.assertEqual(res_h.returncode, 0)
         self.assertIn("Usage:", res_h.stdout)
+
+class DiagnosticTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with mock.patch.dict("os.environ", {"QT_QPA_PLATFORM": "offscreen"}):
+            cls.qt_app = APP.QApplication.instance() or APP.QApplication([])
+
+    def test_journal_query_scopes_windows_and_limit(self):
+        now = datetime(2026, 11, 22, 12, tzinfo=timezone.utc)
+        previous = APP._LogQuery("kernel", "previous", "warning", 500)
+        args = APP._journal_arguments(previous, now)
+        for option in ("--boot=-1", "--priority=warning", "--lines=501", "--system",
+                       "_TRANSPORT=kernel", "--reverse"):
+            self.assertIn(option, args)
+        user = APP._LogQuery("user", "hour", "all", 100)
+        args = APP._journal_arguments(user, now)
+        self.assertIn("--user", args)
+        self.assertIn(f"--since=@{now.timestamp() - 3600:.6f}", args)
+        self.assertIn(f"--until=@{now.timestamp():.6f}", args)
+        self.assertFalse(any(arg.startswith("--boot") for arg in args))
+
+    def test_journal_uses_available_entries_and_reports_partial_access(self):
+        output = (
+            b'{"__REALTIME_TIMESTAMP":"1760000000000000","_SYSTEMD_UNIT":"demo.service",'
+            b'"PRIORITY":"3","MESSAGE":"first\\nsecond\\u202e"}\n'
+            b'{"MESSAGE":[255,42]}\n{bad json}\n'
+        )
+        with mock.patch.object(APP, "_read_diagnostic_command",
+                               return_value=APP._CommandResult(output, b"Permission denied")):
+            result = APP._collect_diagnostic_logs(
+                APP._LogQuery("system", "current", "all", 100), "", threading.Event(),
+            )
+        self.assertEqual(result.status, "permission")
+        self.assertEqual(result.skipped, 1)
+        self.assertEqual(result.rows[0].origin, "demo.service")
+        self.assertEqual(result.rows[0].priority, 3)
+        self.assertEqual(result.rows[0].message, "first\nsecond\\u202e")
+        self.assertIsNone(result.rows[1].message)
+        self.assertEqual(APP._journal_status(APP._CommandResult(code=1, error=b"No journal files"), "current"),
+                         "missing")
+        self.assertEqual(APP._journal_status(APP._CommandResult(code=1, error=b"No boot found"), "previous"),
+                         "boot_missing")
+        with mock.patch.object(APP, "_read_diagnostic_command",
+                               return_value=APP._CommandResult(b'{bad json}\n' + b'{"MESSAGE":"ok"}\n' * 100)):
+            result = APP._collect_diagnostic_logs(
+                APP._LogQuery("system", "current", "all", 100), "", threading.Event(),
+            )
+        self.assertTrue(result.capped)
+        self.assertEqual((result.skipped, len(result.rows)), (1, 99))
+
+    def test_command_reader_bounds_output_and_times_out(self):
+        cancel = threading.Event()
+        with mock.patch.object(APP, "_command_path", return_value=sys.executable):
+            result = APP._read_diagnostic_command(
+                "fixture", ("-c", "import sys; sys.stdout.write('x\\n' * 200000)"),
+                cancel, time.monotonic() + 2, limit=128,
+            )
+            self.assertEqual(result.status, "capped")
+            self.assertEqual(result.output, b"x\n" * 64)
+            result = APP._read_diagnostic_command(
+                "fixture", ("-c", "import time; time.sleep(10)"),
+                cancel, time.monotonic() + 0.2,
+            )
+            self.assertEqual(result.status, "timeout")
+            cancel.set()
+            self.assertEqual(APP._read_diagnostic_command(
+                "fixture", (), cancel, time.monotonic() + 1,
+            ).status, "cancelled")
+
+    def test_pacman_tail_and_time_filter(self):
+        now = datetime(2026, 11, 22, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pacman.log"
+            path.write_text(
+                "x" * 120 + "\n"
+                "[2026-11-21T11:00:00+0000] [ALPM] old action\n"
+                "[2026-11-22T11:30:00+0000] [PACMAN] recent command\n"
+                "[2026-11-22T11:45:00+0000] [ALPM-SCRIPTLET] recent warning\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(APP, "_PACMAN_TAIL_LIMIT", 165):
+                result = APP._collect_diagnostic_logs(
+                    APP._LogQuery("pacman", "day", "all", 100), path, threading.Event(), now,
+                )
+            self.assertTrue(result.capped)
+            self.assertEqual([r.message for r in result.rows], ["recent warning", "recent command"])
+            self.assertEqual(result.rows[0].origin, "ALPM-SCRIPTLET")
+            self.assertEqual(
+                APP._collect_diagnostic_logs(APP._LogQuery("pacman", "latest", "all", 100),
+                                             path.with_suffix(".missing"), threading.Event(), now).status,
+                "missing",
+            )
+
+    def test_inventory_parsers_and_version(self):
+        gpus = APP._diagnostic_gpus(
+            "Slot:\t00:01.0\nClass:\tVGA compatible controller [0300]\n"
+            "Vendor:\tTest [1111]\nDevice:\tGraphics [0002]\nDriver:\tfixture\n\n"
+            "Class:\tEthernet [0200]\nDevice:\tNIC\n"
+        )
+        self.assertEqual(gpus, [("Test [1111] Graphics [0002]", "fixture")])
+        self.assertEqual(APP._diagnostic_disks(
+            '{"blockdevices":[{"type":"disk","size":1073741824,"model":" Test Disk ",'
+            '"tran":"nvme","serial":"private"},{"type":"part","size":20}]}'
+        ), ["Test Disk · nvme · 1.0 GiB"])
+        for lang in ("en", "de"):
+            with mock.patch.object(APP, "_LANG", lang), mock.patch.object(APP.MainWindow, "load_data"):
+                window = APP.MainWindow()
+                self.assertIn(APP.__version__, window.version_label.text())
+                window.close()
+
+    def test_report_redacts_and_keeps_latest_complete_entries(self):
+        marker = "[redacted]"
+        original = (
+            'host=demo.local /home/demo/file api_key="private key" '
+            'https://name:secret@example.org/path?token=unsafe '
+            '192.0.2.42. 2001:db8:: ::ffff:192.0.2.10 fe80::1%eth0 '
+            'aa:bb:cc:dd:ee:ff contact@example.org 6.12.0\nAuthorization: Bearer access'
+        )
+        cleaned = APP._redact_diagnostic(original, marker, "/home/demo", "demo.local")
+        for secret in ("demo.local", "/home/demo", "private key", "name:secret", "unsafe",
+                       "192.0.2.42", "2001:db8::", "::ffff:192.0.2.10", "fe80::1%eth0",
+                       "aa:bb:cc:dd:ee:ff", "contact@example.org", "Bearer access"):
+            self.assertNotIn(secret, cleaned)
+        self.assertIn("6.12.0", cleaned)
+        self.assertIn("https://example.org/path", cleaned)
+        rows = [APP._LogEntry(None, None, "demo", f"record {i}\n" + "a" * 4000)
+                for i in range(8)]
+        report = APP._format_diagnostic_report("Header", rows, None, "en", "", "")
+        self.assertLessEqual(len(report), APP._DIAG_REPORT_LIMIT)
+        self.assertIn("5 of 8", report)
+        self.assertNotIn("record 5", report)
+        self.assertLess(report.index("record 4"), report.index("record 0"))
+        key_rows = [APP._LogEntry(None, None, "", message) for message in (
+            "-----END PRIVATE KEY-----", "synthetic private value", "-----BEGIN PRIVATE KEY-----",
+        )]
+        self.assertNotIn("synthetic private value",
+                         APP._format_diagnostic_report("Header", key_rows, None, "en", "", ""))
+
+    def test_review_copies_edited_plain_text_only_after_copy(self):
+        clipboard = APP.QApplication.clipboard()
+        original = clipboard.text()
+        self.addCleanup(clipboard.setText, original)
+        clipboard.setText("before")
+        preview = APP._DiagnosticPreview("initial", "en", None)
+        self.assertEqual(clipboard.text(), "before")
+        preview.editor.setPlainText("edited <literal>")
+        preview.copy_button.click()
+        self.assertEqual(clipboard.text(), "edited <literal>")
+        preview.close()
+
+    def test_closed_or_changed_requests_cannot_update_the_log_view(self):
+        pool = mock.Mock()
+        dialog = APP.DiagnosticWindow(pool, "", None)
+        dialog._job_finished(None)
+        dialog._load_logs()
+        dialog.source.setCurrentIndex(1)
+        stale_job = dialog.job[2]
+        self.assertTrue(stale_job.cancel.is_set())
+        dialog._load_logs()
+        dialog._job_finished(APP._LogResult((APP._LogEntry(None, None, "", "stale"),)))
+        self.assertEqual(dialog.log_model.rowCount(), 0)
+        dialog._job_finished(APP._LogResult((APP._LogEntry(None, None, "", "fresh"),)))
+        self.assertEqual(dialog.log_model.rows[0].message, "fresh")
+        dialog._load_logs()
+        last_job = dialog.job[2]
+        dialog.reject()
+        self.assertTrue(last_job.cancel.is_set())
+
+    def test_atomic_csv_preserves_destination_when_write_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "export.csv"
+            self.assertTrue(APP._write_csv(str(path), ("Package",), (("=unsafe",), ("next",))))
+            expected = b"Package\r\n'=unsafe\r\nnext\r\n"
+            self.assertEqual(path.read_bytes(), expected)
+            with mock.patch.object(APP, "_csv_safe", side_effect=OSError("simulated write failure")):
+                with self.assertRaises(OSError):
+                    APP._write_csv(str(path), ("Other",), (("now",),))
+            self.assertEqual(path.read_bytes(), expected)
+            self.assertEqual(list(Path(tmp).iterdir()), [path])
+
 
 if __name__ == "__main__":
     unittest.main()
